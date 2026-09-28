@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="indigo" data-bg="slate" data-font="pretendard">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>수행평가 입력기 Pro</title>
+  
+  <!-- 웹폰트 (Pretendard & Google Fonts) -->
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Gowun+Batang&family=Gowun+Dodum&family=IBM+Plex+Sans+KR:wght@300;400;600;700&family=Jua&family=Nanum+Gothic:wght@400;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+  
+  <!-- 아이콘 라이브러리 (Lucide Icons) -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- 엑셀 및 압축 파일 파서 (SheetJS & JSZip) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+  <!-- 커스텀 스타일시트 -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="theme-indigo font-pretendard bg-slate">
+  <!-- 전체 앱 쉘 -->
+  <div id="app" class="app-container">
+    
+    <!-- 1. 글로벌 헤더 -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand-logo">
+          <i data-lucide="activity" class="brand-icon"></i>
+          <span class="brand-title">수행평가 Pro</span>
+          <span class="badge-version">v2.0</span>
+        </div>
+        
+        <!-- 학기 선택 및 전환 칩 -->
+        <div class="semester-pill-selector" id="semesterPill">
+          <i data-lucide="calendar" class="pill-icon"></i>
+          <span id="currentSemesterText" class="current-semester-label">2026학년도 2학기</span>
+          <i data-lucide="chevron-down" class="pill-arrow"></i>
+        </div>
+      </div>
+
+      <!-- 헤더 액션 툴바 -->
+      <div class="header-right">
+        <!-- 실행 취소 / 다시 실행 버튼 -->
+        <div class="history-actions">
+          <button id="btnUndo" class="btn-icon" title="되돌리기 (Ctrl+Z)" disabled>
+            <i data-lucide="undo-2"></i>
+          </button>
+          <button id="btnRedo" class="btn-icon" title="다시 실행 (Ctrl+Y)" disabled>
+            <i data-lucide="redo-2"></i>
+          </button>
+        </div>
+
+        <div class="header-divider"></div>
+
+        <!-- 대시보드 통계 모달 열기 -->
+        <button id="btnOpenDashboard" class="btn-header-action" title="평가 현황 대시보드">
+          <i data-lucide="bar-chart-3"></i>
+          <span class="action-text">현황</span>
+        </button>
+
+        <!-- 데이터/엑셀 관리 모달 열기 -->
+        <button id="btnOpenDataCenter" class="btn-header-action" title="데이터 및 엑셀 관리">
+          <i data-lucide="database"></i>
+          <span class="action-text">데이터</span>
+        </button>
+
+        <!-- 환경설정 모달 열기 -->
+        <button id="btnOpenSettings" class="btn-icon" title="설정">
+          <i data-lucide="settings"></i>
+        </button>
+
+        <!-- 일괄 서버 저장 버튼 -->
+        <button id="btnSaveAll" class="btn-primary-save" title="구글 시트 백엔드로 일괄 동기화">
+          <i data-lucide="cloud-upload" id="saveIcon"></i>
+          <span id="saveBtnText">저장</span>
+          <span id="saveDirtyBadge" class="dirty-badge hidden"></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- 2. 서브 내비게이션 바 (반 선택 / 종목 선택 / 마감 스위치) -->
+    <nav class="sub-navbar">
+      <!-- 반 선택 탭 -->
+      <div class="nav-class-wrapper">
+        <span class="nav-label">학급:</span>
+        <div class="class-tab-scroller" id="classTabContainer">
+          <!-- 동적 렌더링 (예: 1반, 2반, 3반...) -->
+        </div>
+      </div>
+
+      <!-- 종목(평가영역) 선택 탭 및 마감 토글 -->
+      <div class="nav-domain-wrapper">
+        <div class="domain-tab-scroller" id="domainTabContainer">
+          <!-- 동적 렌더링 (예: 탁구 포핸드, 빅발리볼 서브...) -->
+        </div>
+
+        <div class="lock-control-wrap">
+          <button id="btnToggleDomainLock" class="btn-lock-toggle" data-locked="false" title="원터치 마감 잠금 토글">
+            <i data-lucide="lock-open" id="domainLockIcon"></i>
+            <span id="domainLockText">입력중</span>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- 3. 메인 작업 레이아웃 (좌측 명렬표 / 우측 측정 패널) -->
+    <main class="main-workspace">
+      
+      <!-- [좌측 패널] 학생 명렬표 카드 리스트 -->
+      <section class="roster-panel" id="rosterPanel">
+        <div class="roster-header">
+          <!-- 검색 및 필터 컨트롤 -->
+          <div class="roster-search-bar">
+            <i data-lucide="search" class="search-icon"></i>
+            <input type="text" id="studentSearchInput" placeholder="이름 또는 번호로 검색..." autocomplete="off">
+            <button id="btnClearSearch" class="btn-clear-search hidden"><i data-lucide="x"></i></button>
+          </div>
+
+          <!-- 상태별 필터 칩 -->
+          <div class="roster-filters">
+            <button class="filter-chip active" data-filter="all">전체 <span id="cntFilterAll">0</span></button>
+            <button class="filter-chip" data-filter="done">완료 <span id="cntFilterDone">0</span></button>
+            <button class="filter-chip" data-filter="undone">미측정 <span id="cntFilterUndone">0</span></button>
+            <button class="filter-chip" data-filter="absent">결석 <span id="cntFilterAbsent">0</span></button>
+          </div>
+
+          <!-- 명단 유틸리티 버튼 -->
+          <div class="roster-tools">
+            <button id="btnOpenStudentManager" class="btn-tool" title="전입/전출 및 번호 재부여">
+              <i data-lucide="user-plus"></i> 명단관리
+            </button>
+            <button id="btnOpenBulkPhoto" class="btn-tool" title="엑셀 사진 일괄 등록">
+              <i data-lucide="image-plus"></i> 사진일괄
+            </button>
+          </div>
+        </div>
+
+        <!-- 학생 목록 컨테이너 -->
+        <div class="roster-list-viewport" id="studentListContainer">
+          <!-- 동적 학생 카드 렌더링 -->
+        </div>
+      </section>
+
+      <!-- [우측 패널] 프로페셔널 스포츠 애널리틱스 측정 대시보드 -->
+      <section class="measurement-panel" id="measurementPanel">
+        
+        <!-- 상단: 선택 학생 프로필 카드 -->
+        <div class="profile-hero-card">
+          <div class="profile-avatar-box" id="btnOpenPhotoStudio" title="사진 뷰어 및 스튜디오 열기">
+            <img id="activeStudentAvatar" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'%3E%3C/path%3E%3Ccircle cx='12' cy='7' r='4'%3E%3C/circle%3E%3C/svg%3E" alt="학생 사진">
+            <span class="avatar-camera-overlay"><i data-lucide="camera"></i></span>
+          </div>
+
+          <div class="profile-meta-info">
+            <div class="profile-title-row">
+              <span class="student-grade-class" id="activeStudentClass">-반</span>
+              <span class="student-number" id="activeStudentNumber">-번</span>
+              <h2 class="student-name" id="activeStudentName">학생을 선택하세요</h2>
+              <span id="activeStudentStatusBadge" class="status-badge badge-pending">대기</span>
+            </div>
+
+            <!-- 영역별 점수 요약 바 -->
+            <div class="student-record-strip" id="activeStudentRecordStrip">
+              <div class="strip-item">
+                <span class="strip-label">1차 시기</span>
+                <span class="strip-value" id="dispT1Count">-</span>
+              </div>
+              <div class="strip-item">
+                <span class="strip-label">2차 시기</span>
+                <span class="strip-value" id="dispT2Count">-</span>
+              </div>
+              <div class="strip-item highlight">
+                <span class="strip-label">최종 환산 점수</span>
+                <span class="strip-value" id="dispFinalScore">-</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 특이사항 메모 모달 트리거 -->
+          <div class="profile-side-actions">
+            <button id="btnOpenMemoModal" class="btn-memo-action" title="관찰 메모 등록">
+              <i data-lucide="file-text"></i>
+              <span>메모</span>
+              <span id="activeMemoIndicator" class="memo-dot hidden"></span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 측정 컨트롤 보드 -->
+        <div class="measurement-control-board">
+          <!-- 시기 선택 세그먼트 & 자동 패스 토글 -->
+          <div class="trial-selection-bar">
+            <div class="segment-container" id="trialSegment">
+              <button class="segment-btn active" data-trial="1">1차 시기</button>
+              <button class="segment-btn" data-trial="2">2차 시기</button>
+            </div>
+
+            <div class="auto-pass-toggle-wrap">
+              <label class="switch-toggle" title="1차 시기 만점 시 2차 시기 자동 패스 및 다음 학생으로 이동">
+                <input type="checkbox" id="chkAutoPass" checked>
+                <span class="slider round"></span>
+              </label>
+              <span class="switch-label">만점 시 2차 자동 패스</span>
+            </div>
+          </div>
+
+          <!-- 현재 측정 스코어 디스플레이 카드 -->
+          <div class="live-score-display-card">
+            <div class="display-main">
+              <span class="current-metric-caption" id="activeMetricTitle">현재 입력 성공 횟수</span>
+              <div class="current-metric-value" id="activeTrialCount">-</div>
+              <span class="current-calculated-score" id="activeCalculatedScore">환산 점수: - 점</span>
+            </div>
+            <div class="display-criteria">
+              <span class="criteria-title">종목 극간 배점 기준</span>
+              <div class="criteria-preview-list" id="criteriaMiniList">
+                <!-- 극간 기준 칩 동적 렌더링 -->
+              </div>
+            </div>
+          </div>
+
+          <!-- 온스크린 즉각 반응형 키패드 엔진 -->
+          <div class="touch-keypad-engine" id="keypadEngine">
+            <!-- 0 ~ 10 성공 횟수 고속 입력 키패드 -->
+            <div class="keypad-count-grid">
+              <button class="key-btn count-key" data-value="1">1</button>
+              <button class="key-btn count-key" data-value="2">2</button>
+              <button class="key-btn count-key" data-value="3">3</button>
+              <button class="key-btn count-key" data-value="4">4</button>
+              <button class="key-btn count-key" data-value="5">5</button>
+              <button class="key-btn count-key" data-value="6">6</button>
+              <button class="key-btn count-key" data-value="7">7</button>
+              <button class="key-btn count-key" data-value="8">8</button>
+              <button class="key-btn count-key" data-value="9">9</button>
+              <button class="key-btn count-key" data-value="10">10</button>
+              <button class="key-btn count-key" data-value="0">0</button>
+              <button class="key-btn special-key pass" id="btnKeyPass" title="2차 시기 패스(-)">패스(-)</button>
+            </div>
+
+            <!-- 하단 퀵 액션 키 -->
+            <div class="keypad-utility-grid">
+              <button class="key-btn special-key absent" id="btnKeyAbsent" title="결석 처리 (-1)">
+                <i data-lucide="user-x"></i> 결석
+              </button>
+              <button class="key-btn special-key clear" id="btnKeyClear" title="기록 초기화/미측정">
+                <i data-lucide="delete"></i> 미측정
+              </button>
+            </div>
+          </div>
+
+          <!-- 학생 전환 내비게이터 바 -->
+          <div class="student-nav-bar">
+            <button id="btnPrevStudent" class="btn-nav-step">
+              <i data-lucide="chevron-left"></i> 이전 학생
+            </button>
+            <div class="current-student-position">
+              <span id="currentStudentIndex">0</span> / <span id="totalStudentsInClass">0</span>
+            </div>
+            <button id="btnNextStudent" class="btn-nav-step primary">
+              다음 학생 <i data-lucide="chevron-right"></i>
+            </button>
+          </div>
+        </div>
+
+      </section>
+    </main>
+
+    <!-- ================================================================= -->
+    <!-- 모달 레이어 (100% 필수 비즈니스 로직 연동) -->
+    <!-- ================================================================= -->
+
+    <!-- [모달 1] 캔버스 사진 스튜디오 & 필터 에디터 -->
+    <div class="modal-backdrop hidden" id="photoStudioModal">
+      <div class="modal-card modal-lg">
+        <div class="modal-header">
+          <div class="modal-title">
+            <i data-lucide="crop"></i> 프로필 사진 스튜디오
+          </div>
+          <button class="btn-modal-close" data-target="photoStudioModal"><i data-lucide="x"></i></button>
+        </div>
+
+        <div class="modal-body studio-layout">
+          <!-- 캔버스 인터랙티브 뷰포트 -->
+          <div class="canvas-viewport-wrap">
+            <div class="canvas-viewport" id="canvasViewport">
+              <canvas id="photoEditorCanvas" width="400" height="400"></canvas>
+              <!-- 얼굴 원형 가이드라인 오버레이 -->
+              <div class="face-guide-circle"></div>
+            </div>
+            <span class="canvas-guide-text">마우스 또는 손가락으로 드래그하여 위치(Pan)를 조정하세요</span>
+          </div>
+
+          <!-- 스튜디오 툴패널 -->
+          <div class="studio-controls-panel">
+            <div class="studio-input-actions">
+              <label class="btn-action-outline">
+                <i data-lucide="camera"></i> 촬영하기
+                <input type="file" id="cameraFileInput" accept="image/*" capture="user" hidden>
+              </label>
+              <label class="btn-action-outline">
+                <i data-lucide="image"></i> 앨범선택
+                <input type="file" id="albumFileInput" accept="image/*" hidden>
+              </label>
+            </div>
+
+            <!-- 변형 컨트롤러 -->
+            <div class="control-sliders">
+              <div class="slider-row">
+                <span class="slider-label">확대/축소 (Zoom)</span>
+                <input type="range" id="zoomSlider" min="50" max="300" value="100">
+                <span class="slider-val" id="zoomVal">100%</span>
+              </div>
+              <div class="slider-row">
+                <span class="slider-label">가로 늘리기 (Scale X)</span>
+                <input type="range" id="scaleXSlider" min="50" max="150" value="100">
+                <span class="slider-val" id="scaleXVal">100%</span>
+              </div>
+              <div class="slider-row">
+                <span class="slider-label">세로 늘리기 (Scale Y)</span>
+                <input type="range" id="scaleYSlider" min="50" max="150" value="100">
+                <span class="slider-val" id="scaleYVal">100%</span>
+              </div>
+            </div>
+
+            <!-- 회전 및 초기화 버튼 -->
+            <div class="control-transform-buttons">
+              <button id="btnRotate90" class="btn-tool-sub"><i data-lucide="rotate-cw"></i> 90° 회전</button>
+              <button id="btnResetTransform" class="btn-tool-sub"><i data-lucide="refresh-cw"></i> 변형 리셋</button>
+            </div>
+
+            <!-- 8종 감성 프리셋 필터 -->
+            <div class="studio-filters-section">
+              <span class="section-label">컬러 필터 프리셋</span>
+              <div class="filter-pill-grid">
+                <button class="filter-pill active" data-filter="normal">원본</button>
+                <button class="filter-pill" data-filter="bright">화사한</button>
+                <button class="filter-pill" data-filter="warm">따뜻한</button>
+                <button class="filter-pill" data-filter="vivid">선명한</button>
+                <button class="filter-pill" data-filter="bw">흑백</button>
+                <button class="filter-pill" data-filter="glitch">글리치</button>
+                <button class="filter-pill" data-filter="vintage">빈티지</button>
+                <button class="filter-pill" data-filter="cool">쿨톤</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button id="btnDeleteCurrentAvatar" class="btn-danger-outline"><i data-lucide="trash-2"></i> 사진 완전 삭제</button>
+          <div class="footer-right-actions">
+            <button class="btn-secondary" data-target="photoStudioModal">취소</button>
+            <button id="btnSaveStudioAvatar" class="btn-primary"><i data-lucide="check"></i> 사진 적용 및 저장</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- [모달 2] 엑셀 사진 일괄 등록 (JSZip) & VBA 가이드 -->
+    <div class="modal-backdrop hidden" id="bulkPhotoModal">
+      <div class="modal-card modal-md">
+        <div class="modal-header">
+          <div class="modal-title">
+            <i data-lucide="folder-archive"></i> 사진 명렬표 엑셀 일괄 등록
+          </div>
+          <button class="btn-modal-close" data-target="bulkPhotoModal"><i data-lucide="x"></i></button>
+        </div>
+
+        <div class="modal-body">
+          <div class="bulk-upload-dropzone" id="bulkDropZone">
+            <i data-lucide="upload-cloud" class="dropzone-icon"></i>
+            <p class="dropzone-text">사진이 포함된 <strong>엑셀(.xlsx)</strong> 파일을 드래그하거나 클릭하여 업로드하세요</p>
+            <span class="dropzone-sub">압축 해제 후 번호/성명 자동 매칭 및 드라이브 일괄 등록</span>
+            <input type="file" id="bulkExcelFileInput" accept=".xlsx" hidden>
+          </div>
+
+          <div class="bulk-progress-wrap hidden" id="bulkProgressWrap">
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" id="bulkProgressBar" style="width: 0%;"></div>
+            </div>
+            <span class="progress-status-text" id="bulkProgressText">압축 해제 및 이미지 추출 중... (0%)</span>
+          </div>
+
+          <div class="macro-guide-box">
+            <div class="guide-header">
+              <i data-lucide="help-circle"></i>
+              <span>바둑판식 사진 명렬표를 1열로 자동 정렬하려면?</span>
+            </div>
+            <p class="guide-desc">교육행정시스템에서 내려받은 사진 명렬표는 매크로를 이용해 세로 1열로 자동 변환할 수 있습니다.</p>
+            <button id="btnOpenVbaModal" class="btn-link-action">VBA 매크로 코드 복사 및 사용법 보기 <i data-lucide="arrow-right"></i></button>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn-secondary" data-target="bulkPhotoModal">닫기</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- [모달 3] VBA 매크로 복사 안내 모달 -->
+    <div class="modal-backdrop hidden" id="vbaGuideModal">
+      <div class="modal-card modal-md">
+        <div class="modal-header">
+          <div class="modal-title"><i data-lucide="code"></i> 사진 1열 정렬 VBA 매크로 코드</div>
+          <button class="btn-modal-close" data-target="vbaGuideModal"><i data-lucide="x"></i></button>
+        </div>
+        <div class="modal-body">
+          <p class="code-instruction">엑셀에서 <strong>Alt + F11</strong>을 눌러 [삽입] - [모듈] 생성 후 아래 코드를 붙여넣고 <strong>F5</strong>를 실행하세요.</p>
+          <div class="code-block-wrapper">
+            <textarea id="vbaCodeArea" readonly class="code-textarea">
+Sub AlignPhotosInOneColumn()
+    Dim ws As Worksheet: Set ws = ActiveSheet
+    Dim shp As Shape, r As Long: r = 4
+    For Each shp In ws.Shapes
+        If shp.Type = msoPicture Or shp.Type = msoLinkedPicture Then
+            shp.Top = ws.Cells(r, 5).Top + 2
+            shp.Left = ws.Cells(r, 5).Left + 2
+            shp.Width = 60: shp.Height = 75
+            r = r + 1
+        End If
+    Next shp
+    MsgBox "정렬이 완료되었습니다!", vbInformation
+End Sub</textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="btnCopyVbaCode" class="btn-primary"><i data-lucide="copy"></i> 코드 전체 복사</button>
+          <button class="btn-secondary" data-target="vbaGuideModal">닫기</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- [모달 4] 학생 관찰 메모 / 특이사항 모달 -->
+    <div class="modal-backdrop hidden" id="memoModal">
+      <div class="modal-card modal-sm">
+        <div class="modal-header">
+          <div class="modal-title">
+            <i data-lucide="file-edit"></i> 특이사항 관찰 메모
+          </div>
+          <button class="btn-modal-close" data-target="memoModal"><i data-lucide="x"></i></button>
+        </div>
+        <div class="modal-body">
+          <div class="memo-student-info" id="memoStudentTitle">-반 -번 -</div>
+
+          <!-- 원터치 프리셋 태그 -->
+          <div class="memo-preset-tags">
+            <span class="preset-label">빠른 태그:</span>
+            <button class="btn-tag" data-tag="#부상">#부상</button>
+            <button class="btn-tag" data-tag="#재측정">#재측정</button>
+            <button class="btn-tag" data-tag="#태도우수">#태도우수</button>
+            <button class="btn-tag" data-tag="#복장불량">#복장불량</button>
+            <button class="btn-tag" data-tag="#보강참여">#보강참여</button>
+          </div>
+
+          <textarea id="studentMemoInput" rows="5" class="memo-textarea" placeholder="특이사항이나 관찰 내용을 자유롭게 입력하세요..."></textarea>
+        </div>
+        <div class="modal-footer">
+          <button id="btnDeleteMemo" class="btn-danger-outline"><i data-lucide="trash"></i> 삭제</button>
+          <div class="footer-right-actions">
+            <button class="btn-secondary" data-target="memoModal">취소</button>
+            <button id="btnSaveMemo" class="btn-primary">저장</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- [모달 5] 명단 관리 (전입, 전출, 번호 일괄 재부여) -->
+    <div class="modal-backdrop hidden" id="studentManagerModal">
+      <div class="modal-card modal-lg">
+        <div class="modal-header">
+          <div class="modal-title"><i data-lucide="users"></i> 학급 명단 및 순서 관리</div>
+          <button class="btn-modal-close" data-target="studentManagerModal"><i data-lucide="x"></i></button>
+        </div>
+        <div class="modal-body roster-manage-layout">
+          <!-- 전입 학생 추가 폼 -->
+          <div class="add-student-form">
+            <span class="section-label">전입 학생 신규 등록</span>
+            <div class="form-row">
+              <input type="text" id="addStudentClass" placeholder="반" class="input-sm">
+              <input type="number" id="addStudentNumber" placeholder="번호" class="input-sm">
+              <input type="text" id="addStudentName" placeholder="성명" class="input-md">
+              <button id="btnAddStudentSubmit" class="btn-primary"><i data-lucide="user-plus"></i> 추가</button>
+            </div>
+          </div>
+
+          <!-- 명단 순서 변경 및 삭제 목록 -->
+          <div class="roster-manage-list-wrapper">
+            <div class="roster-manage-toolbar">
+              <span class="manage-count-label">현재 학급 학생: <strong id="manageTotalCount">0</strong>명</span>
+              <button id="btnRenumberAll" class="btn-tool-sub" title="현재 정렬 순서대로 1번부터 번호 일괄 재부여">
+                <i data-lucide="list-ordered"></i> 번호 일괄 재부여
+              </button>
+            </div>
+
+            <div class="manage-student-table-scroll">
+              <table class="manage-student-table">
+                <thead>
+                  <tr>
+                    <th style="width: 50px;">순서</th>
+                    <th style="width: 60px;">반</th>
+                    <th style="width: 70px;">번호</th>
+                    <th>성명</th>
+                    <th style="width: 100px;">이동</th>
+                    <th style="width: 70px;">삭제</th>
+                  </tr>
+                </thead>
+                <tbody id="manageStudentListBody">
+                  <!-- 동적 렌더링 -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" data-target="studentManagerModal">닫기</button>
+          <button id="btnApplyStudentChanges" class="btn-primary">변경사항 시트 반영</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- [모달 6] 평가 현황 및 통계 대시보드 -->
+    <div class="modal-backdrop hidden" id="dashboardModal">
+      <div class="modal-card modal-lg">
+        <div class="modal-header">
+          <div class="modal-title"><i data-lucide="pie-chart"></i> 평가 결과 현황 대시보드</div>
+          <button class="btn-modal-close" data-target="dashboardModal"><i data-lucide="x"></i></button>
+        </div>
+        <div class="modal-body">
+          <!-- 전체 종합 통계 카드 -->
+          <div class="stats-summary-grid">
+            <div class="stat-card">
+              <span class="stat-label">전체 대상</span>
+              <span class="stat-val" id="statTotalStudents">0명</span>
+            </div>
+            <div class="stat-card success">
+              <span class="stat-label">평가 완료</span>
+              <span class="stat-val" id="statCompletedStudents">0명</span>
+              <span class="stat-sub" id="statCompletionRate">(0%)</span>
+            </div>
+            <div class="stat-card warning">
+              <span class="stat-label">미측정 인원</span>
+              <span class="stat-val" id="statPendingStudents">0명</span>
+            </div>
+            <div class="stat-card danger">
+              <span class="stat-label">미참여(결석)</span>
+              <span class="stat-val" id="statAbsentStudents">0명</span>
+            </div>
+          </div>
+
+          <!-- 학급별 프로그레스 카드 그리드 -->
+          <span class="section-label mt-4">학급별 진행 상태 및 미완료자 현황</span>
+          <div class="class-progress-grid" id="classProgressCardsContainer">
+            <!-- 동적 반별 프로그레스 렌더링 -->
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" data-target="dashboardModal">닫기</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- [모달 7] 데이터 센터 & 학기 누적 관리 -->
+    <div class="modal-backdrop hidden" id="dataCenterModal">
+      <div class="modal-card modal-md">
+        <div class="modal-header">
+          <div class="modal-title"><i data-lucide="folder-git-2"></i> 데이터 및 학기 누적 관리 센터</div>
+          <button class="btn-modal-close" data-target="dataCenterModal"><i data-lucide="x"></i></button>
+        </div>
+        <div class="modal-body data-center-layout">
+          
+          <!-- 학기 생성/전환 섹션 -->
+          <div class="data-group-box">
+            <span class="group-title"><i data-lucide="calendar-plus"></i> 학기 누적 관리</span>
+            <div class="semester-manage-row">
+              <select id="selectSemesterList" class="select-field"></select>
+              <button id="btnSwitchSemester" class="btn-action-outline">이 학기로 전환</button>
+            </div>
+            
+            <div class="semester-buttons-row">
+              <button id="btnOpenNewSemesterDialog" class="btn-tool-sub"><i data-lucide="plus-circle"></i> 새 학기 생성</button>
+              <button id="btnRenameCurrentSemester" class="btn-tool-sub"><i data-lucide="edit-3"></i> 학기명 수정</button>
+              <button id="btnDeleteCurrentSemester" class="btn-danger-outline"><i data-lucide="trash-2"></i> 학기 데이터 삭제</button>
+            </div>
+          </div>
+
+          <!-- 엑셀 다운로드 섹션 -->
+          <div class="data-group-box">
+            <span class="group-title"><i data-lucide="download"></i> 엑셀 보고서 내려받기</span>
+            <div class="excel-download-grid">
+              <button id="btnExportDetailExcel" class="btn-action-card">
+                <i data-lucide="file-spreadsheet"></i>
+                <div class="btn-card-texts">
+                  <strong>세부기록 엑셀 다운로드</strong>
+                  <span>1차, 2차 시기, 환산점수 및 메모 내역 보관</span>
+                </div>
+              </button>
+              <button id="btnExportNeisExcel" class="btn-action-card">
+                <i data-lucide="file-check"></i>
+                <div class="btn-card-texts">
+                  <strong>NEIS 일괄등록 엑셀 다운로드</strong>
+                  <span>나이스 점수 일괄 업로드용 규격 서식</span>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <!-- 수정본 역반영 업로드 및 초기화 -->
+          <div class="data-group-box">
+            <span class="group-title"><i data-lucide="refresh-cw"></i> 엑셀 수정본 업로드 및 반 초기화</span>
+            <div class="flex-btn-row">
+              <label class="btn-action-outline full-width">
+                <i data-lucide="upload"></i> 세부기록 수정 엑셀 역반영 업로드
+                <input type="file" id="reverseExcelFileInput" accept=".xlsx" hidden>
+              </label>
+            </div>
+
+            <div class="reset-actions-row mt-2">
+              <button id="btnResetCurrentDomain" class="btn-danger-outline" title="현재 반의 현재 종목 기록만 비움">
+                현재 반·종목 초기화
+              </button>
+              <button id="btnResetAllDomains" class="btn-danger-outline" title="현재 반의 모든 평가영역 기록 비움">
+                현재 반 전체종목 초기화
+              </button>
+            </div>
+          </div>
+
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" data-target="dataCenterModal">닫기</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- [모달 8] 커스텀 설정 & 통합 백업 센터 -->
+    <div class="modal-backdrop hidden" id="settingsModal">
+      <div class="modal-card modal-lg">
+        <div class="modal-header">
+          <div class="modal-title"><i data-lucide="sliders"></i> 시스템 환경설정 및 백업</div>
+          <button class="btn-modal-close" data-target="settingsModal"><i data-lucide="x"></i></button>
+        </div>
+        <div class="modal-body settings-layout">
+          
+          <!-- GAS 백엔드 API 연동 -->
+          <div class="settings-group">
+            <span class="settings-group-title"><i data-lucide="link"></i> GAS Web App API 엔드포인트 URL</span>
+            <div class="api-url-row">
+              <input type="url" id="gasApiUrlInput" class="input-text" placeholder="https://script.google.com/macros/s/.../exec">
+              <button id="btnTestApiConnection" class="btn-action-outline">연결 테스트</button>
+            </div>
+            <span class="settings-hint">GitHub Pages 정적 호스팅과 구글 시트 데이터베이스를 연결하는 마스터 스크립트 URL입니다.</span>
+          </div>
+
+          <!-- 테마, 배경, 글꼴 커스텀 -->
+          <div class="settings-group">
+            <span class="settings-group-title"><i data-lucide="palette"></i> 디자인 및 스타일 커스텀</span>
+            
+            <!-- 12종 테마 색상 -->
+            <div class="theme-picker-wrap">
+              <span class="sub-label">12종 테마 액센트 컬러:</span>
+              <div class="color-palette-grid" id="themeColorGrid">
+                <!-- 동적 12종 팔레트 버튼 (Indigo, Emerald, Sky, Teal, Violet, Fuchsia, Rose, Amber, Orange, Lime, Slate, Zinc) -->
+              </div>
+            </div>
+
+            <!-- 6종 배경색 -->
+            <div class="bg-picker-wrap mt-3">
+              <span class="sub-label">6종 배경 스타일:</span>
+              <div class="bg-palette-grid" id="bgStyleGrid">
+                <!-- 라이트 슬레이트, 크림 베이지, 산뜻 민트, 아이스 블루, 소프트 라벤더, 다크 모드 -->
+              </div>
+            </div>
+
+            <!-- 8종 한글 글꼴 -->
+            <div class="font-picker-wrap mt-3">
+              <span class="sub-label">8종 한글 글꼴:</span>
+              <select id="fontFamilySelector" class="select-field">
+                <option value="pretendard">Pretendard (기본 - 깔끔한 고딕)</option>
+                <option value="noto">본고딕 (Noto Sans KR)</option>
+                <option value="nanum">나눔고딕 (Nanum Gothic)</option>
+                <option value="gowun-dodum">고운돋움</option>
+                <option value="ibm">IBM Plex Sans KR</option>
+                <option value="gowun-batang">고운바탕 (명조 스타일)</option>
+                <option value="dohyeon">도현체 (강렬한 헤드라인)</option>
+                <option value="jua">주아체 (둥글고 친근한 폰트)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- 평가 영역 및 극간 배점표 설정 -->
+          <div class="settings-group">
+            <div class="flex-between">
+              <span class="settings-group-title"><i data-lucide="list-plus"></i> 평가 영역 및 극간 배점 관리</span>
+              <button id="btnAddNewDomain" class="btn-tool-sub"><i data-lucide="plus"></i> 영역 추가</button>
+            </div>
+            
+            <div class="domain-editor-list" id="domainEditorList">
+              <!-- 평가 영역별 카드 에디터 렌더링 -->
+            </div>
+          </div>
+
+          <!-- 전체 데이터 JSON 통합 백업 및 복원 -->
+          <div class="settings-group">
+            <span class="settings-group-title"><i data-lucide="shield-check"></i> 전체 로컬 백업 및 1초 복원</span>
+            <p class="settings-hint">모든 학기의 학생 명렬표, 측정 점수, 메모, 사진 링크 및 환경 설정을 하나의 JSON 파일로 백업합니다.</p>
+            <div class="backup-actions-row">
+              <button id="btnExportFullJson" class="btn-action-outline"><i data-lucide="download"></i> 전체 데이터 JSON 내보내기</button>
+              <label class="btn-action-outline">
+                <i data-lucide="upload"></i> JSON 파일로 원클릭 복원
+                <input type="file" id="importJsonFileInput" accept=".json" hidden>
+              </label>
+            </div>
+          </div>
+
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" data-target="settingsModal">닫기</button>
+          <button id="btnSaveAllSettings" class="btn-primary">설정 저장 및 적용</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- [토스트 알림 컨테이너] -->
+    <div id="toastContainer" class="toast-container"></div>
+
+  </div>
+
+  <!-- 메인 프론트엔드 비즈니스 로직 스크립트 -->
+  <script src="app.js"></script>
+</body>
+</html>
