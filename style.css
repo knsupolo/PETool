@@ -1,12 +1,13 @@
 /* ==========================================================================
-   수행평가 입력기 Pro (v14.1 Pro) - 통합 마스터 스타일시트 (style.css)
-   - 2줄 정돈 헤더, v14.1 Pro 골드 배지 & 모바일 화면전환 세그먼트
+   수행평가 입력기 Pro (v14.2 Pro) - 통합 마스터 스타일시트 (style.css)
+   - 2줄 정돈 헤더, v14.2 Pro 골드 배지 & 모바일 화면전환 세그먼트
    - 좌측 명렬표 톤다운 차등 배지 시스템 & 1차|2차 인라인 요약 뷰
    - 가변 스플리터 리사이저 (명렬표 vs 프로필 좌우 너비 자유 조절)
    - 우측 대형 프로필(96~100px) & 학급/학년 전체 평균 듀얼 인포그래픽
    - 우측 패널 내부 격리형 접이식 키패드 독 (좌측 명렬표 침범 원천 차단)
-   - 플로팅 스톱워치 / 타이머 위젯
-   - 12종 테마, 6종 배경, 8종 웹폰트 및 아이폰 15 프로맥스 반응형 최적화
+   - 엑셀센터 / 기본양식 통합 UI & 사진 순번 보정 도구
+   - 플로팅 스톱워치 위젯 & 12종 테마, 6종 배경, 8종 웹폰트
+   - 아이폰 15 프로맥스 및 모바일 반응형 뷰 모드 최적화
    ========================================================================== */
 
 /* --------------------------------------------------------------------------
@@ -105,7 +106,7 @@ html[data-font="dohyeon"]      { --app-font: 'Do Hyeon', sans-serif; }
 html[data-font="jua"]          { --app-font: 'Jua', cursive; }
 
 /* --------------------------------------------------------------------------
-   2. 베이스 리셋 & 모바일 터치 최적화
+   2. 베이스 리셋 & 터치 인터랙션 최적화
    -------------------------------------------------------------------------- */
 *, *::before, *::after {
   box-sizing: border-box;
@@ -160,7 +161,7 @@ button:active {
 }
 
 /* --------------------------------------------------------------------------
-   3. 글로벌 헤더 (상단 2줄 정돈 메뉴 - v14.1 Pro)
+   3. 글로벌 헤더 (상단 2줄 정돈 메뉴 - v14.2 Pro)
    -------------------------------------------------------------------------- */
 .app-header-two-row {
   background-color: var(--bg-surface);
@@ -205,7 +206,7 @@ button:active {
   white-space: nowrap;
 }
 
-/* v14.1 Pro 골드 배지 */
+/* v14.2 Pro 골드 배지 */
 .badge-gold-pro {
   display: inline-flex;
   align-items: center;
@@ -297,13 +298,19 @@ button:active {
   font-weight: 900;
 }
 
-.btn-header-chip.highlight-chip:hover {
+.btn-header-chip.primary-chip {
   background-color: var(--primary);
+  color: var(--text-inverse);
+  border-color: var(--primary);
+  font-weight: 900;
+}
+
+.btn-header-chip.primary-chip i {
   color: var(--text-inverse);
 }
 
-.btn-header-chip.highlight-chip:hover i {
-  color: var(--text-inverse);
+.btn-header-chip.primary-chip:hover {
+  background-color: var(--primary-hover);
 }
 
 .btn-header-chip.warning-chip {
@@ -420,7 +427,7 @@ button:active {
 }
 
 /* --------------------------------------------------------------------------
-   4. 모바일 화면 전환 세그먼트 바 (iPhone 15 Pro Max 최적화)
+   4. 모바일 화면 전환 세그먼트 바 (아이폰 15 프로맥스 최적화)
    -------------------------------------------------------------------------- */
 .mobile-view-segment-bar {
   display: none;
@@ -1162,7 +1169,7 @@ button:active {
 }
 
 .gauge-marker.school-avg {
-  background-color: #d97706; /* 앰버 골드 */
+  background-color: #d97706;
   box-shadow: 0 0 4px rgba(217, 119, 6, 0.6);
 }
 
@@ -1617,15 +1624,15 @@ html[data-bg="dark"] .dock-toggle-handle {
 
 .stopwatch-controls {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 4px;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
   padding: 0 8px 8px 8px;
 }
 
 .btn-sw {
-  padding: 5px 0;
+  padding: 6px 0;
   border-radius: var(--radius-xs);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 800;
   color: #ffffff;
   text-align: center;
@@ -1634,8 +1641,6 @@ html[data-bg="dark"] .dock-toggle-handle {
 
 .btn-sw.start { background-color: #059669; }
 .btn-sw.start.running { background-color: #dc2626; }
-.btn-sw.lap { background-color: #0284c7; }
-.btn-sw.lap:disabled { opacity: 0.35; cursor: not-allowed; }
 .btn-sw.reset { background-color: #475569; }
 
 /* --------------------------------------------------------------------------
@@ -1812,7 +1817,7 @@ html[data-bg="dark"] .dock-toggle-handle {
 }
 
 /* --------------------------------------------------------------------------
-   13. 모달 세부: 기본 양식 & 반별 초기화 & 사진 순번 보정 도구
+   13. 모달 세부: 통합 엑셀 센터 & 반별 초기화 & 사진 순번 보정
    -------------------------------------------------------------------------- */
 .template-download-grid {
   display: grid;
@@ -2260,12 +2265,10 @@ html[data-bg="dark"] .dock-toggle-handle {
     display: none !important;
   }
 
-  /* 모바일 화면 전환 세그먼트 활성화 */
   .mobile-view-segment-bar {
     display: flex;
   }
 
-  /* HTML data-mobile-view에 따라 뷰 전환 */
   html[data-mobile-view="roster"] .roster-panel {
     display: flex;
     width: 100% !important;
