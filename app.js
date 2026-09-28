@@ -1,22 +1,12 @@
 /* ==========================================================================
-   수행평가 입력기 Pro (v14.1 Pro) - 핵심 통합 제어 엔진 (app.js)
-   - IndexedDB 이미지 격리 스토리지 (5MB Quota 초과 원천 해결)
-   - 클라우드 DB 부트스트랩 자동 로딩 & 실시간/수동 동기화
-   - 0ms 반응형 측정 엔진, 1차 만점 2차 자동 패스 & 0ms 커서 이동
-   - 좌측 명렬표 톤다운 차등 배지 시스템 & 1차|2차 인라인 요약 뷰
-   - 가변 스플리터 리사이저 (명렬표 vs 프로필 좌우 너비 조절)
-   - 학급 평균 & 1~7반 전체(학년) 통합 평균 듀얼 인포그래픽
-   - 통합 명렬표 등록기 (전체 학급 일반 명단 & 사진 올인원 일괄 파서)
-   - 기본 양식 엑셀 다운로드 (학급별/전체) & 수기 작성본 역업로드
-   - 사진 순번 보정 도구 (Shift +1/-1 & Swap 맞교환) & 종횡비 왜곡 방지
-   - 반별 점수 원클릭 초기화 (현재 종목 / 전 종목)
-   - 가로형 평가 영역 탭 에디터 (순서 이동/복사 & 범위형 배점표)
-   - NEIS 클립보드 원터치 복사, TTS 음성 카운트, 플로팅 스톱워치
-   - 아이폰 15 프로맥스 모바일 세그먼트 전환 UX 최적화
+   수행평가 입력기 Pro (v14.1 Pro) - [1편: 코어 & 클라우드 DB 엔진]
+   - IndexedDB 이미지 격리 스토리지 (5MB Quota 초과 완전 해결)
+   - 클라우드 DB 부트스트랩 자동 로딩 & GAS RESTful API 통신
+   - Undo/Redo 스택 엔진 & 범위형(min~max) 극간 배점 매핑
    ========================================================================== */
 
 // --------------------------------------------------------------------------
-// 1. 전역 상수 & 상태 관리 (State Management)
+// 1. 전역 상수 & 상태 정의
 // --------------------------------------------------------------------------
 const APP_VERSION = 'v14.1 Pro';
 const APP_STORAGE_KEY = 'PE_EVAL_PRO_V14_1_DATA';
@@ -86,37 +76,13 @@ let appState = {
   database: {}
 };
 
-// Undo / Redo 스택
 let undoStack = [];
 let redoStack = [];
 const MAX_HISTORY = 30;
-
-// 웹 오디오 엔진
 let audioCtx = null;
 
-// 캔버스 사진 스튜디오 상태
-let studioImage = new Image();
-let studioState = {
-  zoom: 100,
-  scaleX: 100,
-  scaleY: 100,
-  rotation: 0,
-  panX: 0,
-  panY: 0,
-  filter: 'normal',
-  isDragging: false,
-  dragStartX: 0,
-  dragStartY: 0
-};
-
-// 스톱워치 상태
-let stopwatchInterval = null;
-let stopwatchStartTime = 0;
-let stopwatchElapsed = 0;
-let isStopwatchRunning = false;
-
 // --------------------------------------------------------------------------
-// 2. IndexedDB 이미지 스토리지 엔진 (5MB 쿼터 초과 문제 완전 차단)
+// 2. IndexedDB 이미지 스토리지 (5MB Quota 초과 방지)
 // --------------------------------------------------------------------------
 function openImageDB() {
   return new Promise((resolve, reject) => {
@@ -142,7 +108,6 @@ async function savePhotoToIDB(studentId, base64) {
       tx.onerror = () => reject(tx.error);
     });
   } catch (e) {
-    console.warn("IndexedDB 저장 실패:", e);
     return false;
   }
 }
@@ -176,7 +141,7 @@ async function deletePhotoFromIDB(studentId) {
 }
 
 // --------------------------------------------------------------------------
-// 3. 로컬 스토리지 & 클라우드 DB 부트스트랩 동기화
+// 3. 로컬 스토리지 & 클라우드 초기화
 // --------------------------------------------------------------------------
 async function initLocalStorageData() {
   const savedSettings = localStorage.getItem(SETTINGS_STORAGE_KEY);
@@ -209,10 +174,10 @@ async function initLocalStorageData() {
   applyVisualSettings();
   updateMainTitleDisplay();
 
-  // IndexedDB에 보관된 사진들을 메모리 상의 학생 객체에 비동기 복원
+  // IndexedDB에 저장된 학생 사진 캐시 복원
   await restoreAllPhotosFromIDB();
 
-  // 백엔드와 연결되어 있다면 최신 데이터 패치 시도
+  // 구글 시트 중앙 DB와 최신 동기화 시도
   if (appState.settings.gasApiUrl) {
     fetchCloudDatabase(false);
   }
@@ -227,8 +192,8 @@ async function restoreAllPhotosFromIDB() {
       if (cached) st.photoUrl = cached;
     }
   }
-  renderStudentList();
-  updateActiveStudentPanel();
+  if (typeof renderStudentList === 'function') renderStudentList();
+  if (typeof updateActiveStudentPanel === 'function') updateActiveStudentPanel();
 }
 
 function ensureSemesterData(semester) {
@@ -258,16 +223,14 @@ function initDummyData() {
   saveLocalState();
 }
 
-// 로컬스토리지 쿼터 초과 방지: 대용량 Base64는 제외하고 저장
 function saveLocalState() {
   try {
     const lightweightDb = JSON.parse(JSON.stringify(appState.database));
     for (const sem in lightweightDb) {
       if (lightweightDb[sem]?.students) {
         lightweightDb[sem].students.forEach(st => {
-          // 구글 드라이브 URL은 보존하고, 거대한 data:image Base64 문자열은 localStorage에서 제거
           if (st.photoUrl && st.photoUrl.startsWith('data:image')) {
-            st.photoUrl = ''; // IDB에 영구 보존됨
+            st.photoUrl = ''; // Base64는 IndexedDB에 영구 보존되므로 localStorage 용량 절약
           }
         });
       }
@@ -282,7 +245,7 @@ function saveLocalState() {
     localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(payload));
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(appState.settings));
   } catch (err) {
-    console.error("로컬 스토리지 저장 오류:", err);
+    console.error("Local storage quota error handled:", err);
   }
 }
 
@@ -304,7 +267,7 @@ function updateMainTitleDisplay() {
 }
 
 // --------------------------------------------------------------------------
-// 4. 비프음, 햅틱 & TTS 음성 카운트 엔진
+// 4. 비프음, 햅틱 & TTS 음성 안내
 // --------------------------------------------------------------------------
 function initAudio() {
   if (!audioCtx) {
@@ -382,8 +345,8 @@ function applyUndo() {
   markDirty(true);
   saveLocalState();
   updateUndoRedoButtons();
-  renderStudentList();
-  updateActiveStudentPanel();
+  if (typeof renderStudentList === 'function') renderStudentList();
+  if (typeof updateActiveStudentPanel === 'function') updateActiveStudentPanel();
   showToast("실행 취소(Undo) 완료");
 }
 
@@ -398,8 +361,8 @@ function applyRedo() {
   markDirty(true);
   saveLocalState();
   updateUndoRedoButtons();
-  renderStudentList();
-  updateActiveStudentPanel();
+  if (typeof renderStudentList === 'function') renderStudentList();
+  if (typeof updateActiveStudentPanel === 'function') updateActiveStudentPanel();
   showToast("다시 실행(Redo) 완료");
 }
 
@@ -411,7 +374,7 @@ function updateUndoRedoButtons() {
 }
 
 // --------------------------------------------------------------------------
-// 6. 평가 연산 및 범위형(min~max) 극간 배점표 매핑 엔진
+// 6. 평가 연산 및 범위형(min~max) 극간 배점 매핑
 // --------------------------------------------------------------------------
 function getCurrentDomain() {
   return appState.settings.domains.find(d => d.id === appState.activeDomainId) || appState.settings.domains[0];
@@ -433,7 +396,6 @@ function calculateScoreFromCount(count, domain) {
     }
   }
 
-  // 상위 범위 초과 처리
   if (criteria.length > 0) {
     const sorted = [...criteria].sort((a, b) => {
       const aMin = a.minCount !== undefined ? a.minCount : a.count;
@@ -522,7 +484,135 @@ function updateLockUI() {
 }
 
 // --------------------------------------------------------------------------
-// 7. 좌측 명렬표 & 서브바 렌더링 (톤다운 차등 배지 & 1차|2차 인라인 요약)
+// 7. 클라우드 API 통신 (GAS Web App)
+// --------------------------------------------------------------------------
+async function callGasApi(action, payload = {}) {
+  const url = appState.settings.gasApiUrl;
+  if (!url) throw new Error("GAS API URL이 등록되지 않았습니다.");
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify({ action, ...payload })
+  });
+  return await res.json();
+}
+
+async function fetchCloudDatabase(showToastNotice = true) {
+  if (!appState.settings.gasApiUrl) return;
+  try {
+    const res = await callGasApi('GET_INITIAL_DATA', { semester: appState.currentSemester });
+    if (res && res.success && res.students && res.students.length > 0) {
+      const sem = appState.currentSemester;
+      if (!appState.database[sem]) appState.database[sem] = { students: [], records: {} };
+
+      appState.database[sem].students = res.students.map(st => ({
+        id: st.id,
+        classNum: st.classNum,
+        num: st.num,
+        name: st.name,
+        photoUrl: st.photoUrl || ''
+      }));
+
+      if (res.records) {
+        appState.database[sem].records = Object.assign({}, appState.database[sem].records, res.records);
+      }
+
+      if (res.classes && res.classes.length > 0) {
+        appState.settings.classes = res.classes;
+      }
+
+      saveLocalState();
+      if (typeof renderClassTabs === 'function') renderClassTabs();
+      if (typeof renderStudentList === 'function') renderStudentList();
+      if (typeof updateActiveStudentPanel === 'function') updateActiveStudentPanel();
+      if (showToastNotice) showToast("구글 시트 중앙 DB와 실시간 동기화 완료! ☁️");
+    }
+  } catch (e) {
+    console.warn("클라우드 자동 로드 대기:", e);
+  }
+}
+
+async function saveAllToGoogleSheets() {
+  const url = appState.settings.gasApiUrl;
+  if (!url) {
+    alert("먼저 [설정] 창에서 구글 앱스 스크립트(GAS) Web App API URL을 등록해주세요!");
+    if (typeof openModal === 'function') openModal('settingsModal');
+    return;
+  }
+
+  const btn = document.getElementById('btnSaveAll');
+  const text = document.getElementById('saveBtnText');
+  if (btn) btn.disabled = true;
+  if (text) text.textContent = "저장중...";
+
+  try {
+    const sem = appState.currentSemester;
+    const currentStudents = (appState.database[sem]?.students || []).filter(s => s.classNum === appState.activeClass);
+    const updates = [];
+
+    currentStudents.forEach(st => {
+      appState.settings.domains.forEach((d, dSeq) => {
+        const r = getStudentRecord(st.id, d.id);
+        updates.push({
+          number: st.num,
+          domainSeq: dSeq,
+          excelHeader: d.excelHeader || d.shortName || d.name,
+          t1: r.t1,
+          t2: r.t2,
+          finalScore: r.finalScore,
+          memo: r.memo || ''
+        });
+      });
+    });
+
+    const payload = {
+      semester: sem,
+      gradeClass: appState.activeClass.replace(/[^0-9]/g, ''),
+      updates: updates,
+      config: appState.settings
+    };
+
+    const res = await callGasApi('SAVE_CLASS_SCORES_BATCH', payload);
+
+    if (res && res.success) {
+      markDirty(false);
+      showToast(`${appState.activeClass} 학생 성적이 구글 시트에 안전하게 영구 저장되었습니다! 💾`);
+      feedbackAction('success');
+    } else {
+      alert("시트 저장 오류: " + (res.error || '응답 오류'));
+    }
+  } catch (err) {
+    alert("구글 시트 통신 오류: " + err.message);
+  } finally {
+    if (btn) btn.disabled = false;
+    if (text) text.textContent = "시트저장";
+  }
+}
+// ==========================================================================
+// [2편 시작] 스튜디오 상태 및 스톱워치 전역 변수
+// ==========================================================================
+let studioImage = new Image();
+let studioState = {
+  zoom: 100,
+  scaleX: 100,
+  scaleY: 100,
+  rotation: 0,
+  panX: 0,
+  panY: 0,
+  filter: 'normal',
+  isDragging: false,
+  dragStartX: 0,
+  dragStartY: 0
+};
+
+let stopwatchInterval = null;
+let stopwatchStartTime = 0;
+let stopwatchElapsed = 0;
+let isStopwatchRunning = false;
+
+// --------------------------------------------------------------------------
+// 8. 좌측 명렬표 & 서브바 렌더링 (톤다운 차등 배지 & 1차|2차 인라인 요약)
 // --------------------------------------------------------------------------
 function renderClassTabs() {
   const container = document.getElementById('classTabContainer');
@@ -672,7 +762,6 @@ function renderStudentList() {
 
     const t1Display = rec.t1 !== null ? (rec.t1 === -1 ? '결석' : `${rec.t1}회`) : '-';
     const t2Display = rec.t2 !== null ? (rec.t2 === -1 ? '결석' : (rec.t2 === 'pass' ? '패스(-)' : `${rec.t2}회`)) : '-';
-
     const avatarUrl = student.photoUrl || "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'%3E%3C/path%3E%3Ccircle cx='12' cy='7' r='4'%3E%3C/circle%3E%3C/svg%3E";
     const hasMemo = !!rec.memo;
 
@@ -698,11 +787,7 @@ function renderStudentList() {
       feedbackAction('tap');
       renderStudentList();
       updateActiveStudentPanel();
-
-      // 모바일(아이폰 등) 화면일 때 카드 터치 시 즉시 측정 패널 뷰로 전환
-      if (window.innerWidth <= 900) {
-        setMobileView('measure');
-      }
+      if (window.innerWidth <= 900) setMobileView('measure');
     };
 
     container.appendChild(card);
@@ -726,7 +811,6 @@ function updateRosterPositionText() {
   const sem = appState.currentSemester;
   const list = (appState.database[sem]?.students || []).filter(s => s.classNum === appState.activeClass);
   const curIdx = list.findIndex(s => s.id === appState.selectedStudentId);
-
   const idxEl = document.getElementById('currentStudentIndex');
   const totalEl = document.getElementById('totalStudentsInClass');
   if (idxEl) idxEl.textContent = curIdx >= 0 ? curIdx + 1 : 0;
@@ -734,7 +818,7 @@ function updateRosterPositionText() {
 }
 
 // --------------------------------------------------------------------------
-// 8. 활성 학생 측정 패널 & 학급/학년 전체 인포그래픽 업데이트
+// 9. 측정 패널 & 듀얼 인포그래픽 업데이트
 // --------------------------------------------------------------------------
 function getSelectedStudent() {
   const sem = appState.currentSemester;
@@ -822,7 +906,6 @@ function updateActiveStudentPanel() {
   updateDualInfographic(student, domain);
 }
 
-// 8. 듀얼 인포그래픽 (학급 평균 vs 1~7반 전체 평균 지표)
 function updateDualInfographic(student, domain) {
   const targetLabel = document.getElementById('analyticsStudentTargetLabel');
   const diffBadge = document.getElementById('dispClassAvgDiff');
@@ -854,7 +937,6 @@ function updateDualInfographic(student, domain) {
   const allStudents = appState.database[sem]?.students || [];
   const classStudents = allStudents.filter(s => s.classNum === student.classNum);
 
-  // 1) 학급 평균
   let classSum = 0, classDone = 0;
   classStudents.forEach(st => {
     const r = getStudentRecord(st.id, domain.id);
@@ -865,7 +947,6 @@ function updateDualInfographic(student, domain) {
   });
   const classAvg = classDone > 0 ? (classSum / classDone) : 0;
 
-  // 2) 1~7반 전체(학년) 통합 평균
   let schoolSum = 0, schoolDone = 0;
   allStudents.forEach(st => {
     const r = getStudentRecord(st.id, domain.id);
@@ -884,7 +965,6 @@ function updateDualInfographic(student, domain) {
   if (classAvgEl) classAvgEl.textContent = `${classAvg.toFixed(1)}점`;
   if (schoolAvgEl) schoolAvgEl.textContent = `${schoolAvg.toFixed(1)}점`;
 
-  // 듀얼 게이지 마커 위치 산출 (0~100%)
   if (markerClass) markerClass.style.left = `${Math.min(100, Math.max(0, (classAvg / max) * 100))}%`;
   if (markerSchool) markerSchool.style.left = `${Math.min(100, Math.max(0, (schoolAvg / max) * 100))}%`;
 
@@ -902,7 +982,6 @@ function updateDualInfographic(student, domain) {
     if (avgGauge) avgGauge.style.width = "0%";
   }
 
-  // 3) 1차 대비 2차 향상도
   const s1 = calculateScoreFromCount(curRec.t1, domain);
   const s2 = calculateScoreFromCount(curRec.t2, domain);
 
@@ -931,7 +1010,6 @@ function updateDualInfographic(student, domain) {
     if (improveGauge) improveGauge.style.width = "0%";
   }
 
-  // 4) 전 영역 이수 배지
   const domains = appState.settings.domains;
   let completedDomainCount = 0;
   if (badgesContainer) {
@@ -1061,29 +1139,19 @@ function moveToNextStudent(step = 1) {
 }
 
 // --------------------------------------------------------------------------
-// 9. 캔버스 사진 스튜디오 (종횡비 왜곡 방지 Center-Crop & 8종 필터)
+// 10. 캔버스 사진 스튜디오 & 필터 엔진
 // --------------------------------------------------------------------------
 function openPhotoStudio() {
   const student = getSelectedStudent();
-  if (!student) {
-    showToast("사진을 등록할 학생을 먼저 선택하세요.");
-    return;
-  }
+  if (!student) return showToast("사진을 등록할 학생을 먼저 선택하세요.");
 
   const modal = document.getElementById('photoStudioModal');
   if (modal) modal.classList.remove('hidden');
 
   studioState = {
-    zoom: 100,
-    scaleX: 100,
-    scaleY: 100,
-    rotation: 0,
-    panX: 0,
-    panY: 0,
-    filter: 'normal',
-    isDragging: false,
-    dragStartX: 0,
-    dragStartY: 0
+    zoom: 100, scaleX: 100, scaleY: 100, rotation: 0,
+    panX: 0, panY: 0, filter: 'normal', isDragging: false,
+    dragStartX: 0, dragStartY: 0
   };
 
   syncStudioSliders();
@@ -1122,7 +1190,6 @@ function renderStudioCanvas() {
   ctx.rotate((studioState.rotation * Math.PI) / 180);
   ctx.scale((studioState.zoom / 100) * (studioState.scaleX / 100), (studioState.zoom / 100) * (studioState.scaleY / 100));
 
-  // 정비율 센터 크롭 알고리즘 (사진 가로 납작해짐 방지)
   const imgW = studioImage.width || 400;
   const imgH = studioImage.height || 400;
   const aspect = imgW / imgH;
@@ -1323,7 +1390,7 @@ function initCanvasStudioEvents() {
 }
 
 // --------------------------------------------------------------------------
-// 10. 통합 명렬표 등록 모달 (전체 학급 일괄 지원 & 사진 자동 매칭)
+// 11. 통합 명렬표 등록 모달
 // --------------------------------------------------------------------------
 function initIntegratedRosterUploader() {
   const dropZone = document.getElementById('integratedRosterDropZone');
@@ -1339,6 +1406,11 @@ function initIntegratedRosterUploader() {
   });
   fileInput?.addEventListener('change', (e) => {
     if (e.target.files.length > 0) processIntegratedExcelFile(e.target.files[0]);
+  });
+
+  document.getElementById('btnOpenVbaFromIntegrated')?.addEventListener('click', () => {
+    closeAllModals();
+    openModal('vbaGuideModal');
   });
 }
 
@@ -1410,7 +1482,6 @@ async function processIntegratedExcelFile(file) {
       }
     }
 
-    // 초기 학급 자동 생성 및 정렬 반영
     appState.settings.classes = Array.from(detectedClasses).sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0));
     existingStudents.sort((a, b) => (parseInt(a.classNum) || 0) - (parseInt(b.classNum) || 0) || a.num - b.num);
 
@@ -1456,7 +1527,6 @@ async function processIntegratedExcelFile(file) {
           pBar.style.width = `${50 + Math.round((i / activeClassStudents.length) * 45)}%`;
         }
 
-        // 백엔드 클라우드 일괄 저장
         if (appState.settings.gasApiUrl && avatarBatch.length > 0) {
           callGasApi('SAVE_BATCH_AVATARS', {
             semester: appState.currentSemester,
@@ -1487,7 +1557,7 @@ async function processIntegratedExcelFile(file) {
     setTimeout(() => {
       closeAllModals();
       if (pWrap) pWrap.classList.add('hidden');
-      showToast(`전체 학급(${detectedClasses.size}개 반) 명렬표 등록 완료! (학생 ${studentMergedCount}명 / 사진 ${photoMatchedCount}장) 📑`);
+      showToast(`전체 학급(${detectedClasses.size}개 반) 등록 완료! (학생 ${studentMergedCount}명 / 사진 ${photoMatchedCount}장) 📑`);
     }, 600);
 
   } catch (err) {
@@ -1497,7 +1567,7 @@ async function processIntegratedExcelFile(file) {
 }
 
 // --------------------------------------------------------------------------
-// 11. 수기 입력용 기본 양식 다운로드 & 역업로드 (학급별 / 전체 학급)
+// 12. 수기 입력용 기본 양식 다운로드 & 역업로드
 // --------------------------------------------------------------------------
 function initTemplateModal() {
   document.getElementById('btnOpenTemplateModal')?.addEventListener('click', () => {
@@ -1506,17 +1576,14 @@ function initTemplateModal() {
     openModal('templateModal');
   });
 
-  // 학급별 수기 양식
   document.getElementById('btnDownloadClassTemplate')?.addEventListener('click', () => {
     exportManualEntryTemplate(false);
   });
 
-  // 전체 학급 통합 수기 양식
   document.getElementById('btnDownloadAllTemplate')?.addEventListener('click', () => {
     exportManualEntryTemplate(true);
   });
 
-  // 수기 작성본 역업로드
   document.getElementById('templateUploadFileInput')?.addEventListener('change', (e) => {
     if (e.target.files.length > 0) handleReverseExcelUpload(e.target.files[0]);
   });
@@ -1559,32 +1626,74 @@ function exportManualEntryTemplate(isAllClasses = false) {
 
   const tag = isAllClasses ? "전체학급" : appState.activeClass;
   XLSX.writeFile(wb, `[수행평가양식]_${tag}_${curDomain.shortName || curDomain.name}.xlsx`);
-  showToast(`${tag} 기본 양식 엑셀이 다운로드되었습니다. 📑`);
+  showToast(`${tag} 기본 양식 엑셀 다운로드 완료! 📑`);
+}
+
+async function handleReverseExcelUpload(file) {
+  if (!file) return;
+  try {
+    const data = await file.arrayBuffer();
+    const wb = XLSX.read(data, { type: 'array' });
+    const firstSheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+
+    if (rows.length < 2) return alert("엑셀 데이터가 비어 있습니다.");
+
+    pushHistorySnapshot();
+    const sem = appState.currentSemester;
+    const domain = getCurrentDomain();
+    let updatedCount = 0;
+
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r || r.length < 4) continue;
+      const cNum = String(r[1]).includes('반') ? String(r[1]) : `${r[1]}반`;
+      const num = parseInt(r[2]);
+      const t1Raw = r[5];
+      const t2Raw = r[6];
+      const memo = r[7] || r[8] || '';
+
+      const st = (appState.database[sem]?.students || []).find(s => s.classNum === cNum && s.num === num);
+      if (st) {
+        let t1 = (t1Raw === '결석' || t1Raw === -1) ? -1 : (t1Raw !== undefined && t1Raw !== '' ? Number(t1Raw) : null);
+        let t2 = (t2Raw === '결석' || t2Raw === -1) ? -1 : ((t2Raw === '패스' || t2Raw === '-') ? 'pass' : (t2Raw !== undefined && t2Raw !== '' ? Number(t2Raw) : null));
+
+        updateStudentRecord(st.id, domain.id, { t1, t2, memo });
+        updatedCount++;
+      }
+    }
+
+    markDirty(true);
+    saveLocalState();
+    renderStudentList();
+    updateActiveStudentPanel();
+    closeAllModals();
+    showToast(`수정본 엑셀에서 ${updatedCount}명의 기록이 역반영되었습니다!`);
+  } catch (err) {
+    alert("엑셀 역반영 오류: " + err.message);
+  }
 }
 
 // --------------------------------------------------------------------------
-// 12. 사진 순번 보정 도구 (Shift +1/-1 & Swap 맞교환)
+// 13. 사진 순번 보정 도구 (Shift / Swap)
 // --------------------------------------------------------------------------
 function initPhotoCorrectionModal() {
   document.getElementById('btnOpenPhotoCorrection')?.addEventListener('click', () => {
     openModal('photoCorrectionModal');
   });
 
-  // +1칸 뒤로 밀기
   document.getElementById('btnShiftPhotoBack')?.addEventListener('click', async () => {
     const startNum = parseInt(document.getElementById('shiftStartNumber')?.value);
     if (!startNum) return alert("시작 번호를 입력하세요.");
     await shiftClassPhotos(startNum, 1);
   });
 
-  // -1칸 앞으로 당기기
   document.getElementById('btnShiftPhotoForward')?.addEventListener('click', async () => {
     const startNum = parseInt(document.getElementById('shiftStartNumber')?.value);
     if (!startNum) return alert("시작 번호를 입력하세요.");
     await shiftClassPhotos(startNum, -1);
   });
 
-  // 두 학생 사진 맞교환 (Swap)
   document.getElementById('btnConfirmSwapPhotos')?.addEventListener('click', async () => {
     const n1 = parseInt(document.getElementById('swapNum1')?.value);
     const n2 = parseInt(document.getElementById('swapNum2')?.value);
@@ -1609,7 +1718,7 @@ function initPhotoCorrectionModal() {
     renderStudentList();
     updateActiveStudentPanel();
     closeAllModals();
-    showToast(`${n1}번과 ${n2}번 학생의 사진이 성공적으로 맞교환되었습니다! 🔄`);
+    showToast(`${n1}번과 ${n2}번 학생 사진 맞교환 완료! 🔄`);
   });
 }
 
@@ -1646,7 +1755,7 @@ async function shiftClassPhotos(startNum, direction) {
 }
 
 // --------------------------------------------------------------------------
-// 13. 반별 점수 원클릭 초기화 (현재 종목 / 전 종목)
+// 14. 반별 점수 초기화
 // --------------------------------------------------------------------------
 function initClassResetModal() {
   document.getElementById('btnOpenClassReset')?.addEventListener('click', () => {
@@ -1722,7 +1831,7 @@ function initClassResetModal() {
 }
 
 // --------------------------------------------------------------------------
-// 14. 가로 탭 바 기반 평가 영역 에디터 (순서 이동/복사 & 범위형 배점표)
+// 15. 가로 탭 바 기반 평가 영역 에디터
 // --------------------------------------------------------------------------
 function renderDomainEditorLayout() {
   const tabsBar = document.getElementById('domainEditorTabsBar');
@@ -1815,10 +1924,7 @@ window.copyDomainConfig = function(idx) {
 };
 
 window.deleteDomainConfig = function(idx) {
-  if (appState.settings.domains.length <= 1) {
-    alert("최소 1개 이상의 평가 영역이 필요합니다.");
-    return;
-  }
+  if (appState.settings.domains.length <= 1) return alert("최소 1개 이상의 평가 영역이 필요합니다.");
   if (!confirm("이 평가 영역을 삭제하시겠습니까?")) return;
   appState.settings.domains.splice(idx, 1);
   appState.activeSettingsDomainIdx = Math.max(0, idx - 1);
@@ -1865,7 +1971,7 @@ window.deleteCriteriaTier = (dIdx, cIdx) => {
 };
 
 // --------------------------------------------------------------------------
-// 15. NEIS 클립보드 원터치 복사 & 플로팅 스톱워치
+// 16. NEIS 복사 & 스톱워치 & 가변 스플리터
 // --------------------------------------------------------------------------
 function initNeisClipboardCopy() {
   document.getElementById('btnCopyNeisClipboard')?.addEventListener('click', () => {
@@ -1877,7 +1983,6 @@ function initNeisClipboardCopy() {
 
     if (currentStudents.length === 0) return alert("복사할 학생 데이터가 없습니다.");
 
-    // TSV 포맷 구성
     let tsv = "반\t번호\t성명\t점수\n";
     currentStudents.forEach(st => {
       const rec = getStudentRecord(st.id, curDomain.id);
@@ -1944,9 +2049,6 @@ function updateStopwatchDisplay(ms) {
   if (disp) disp.textContent = str;
 }
 
-// --------------------------------------------------------------------------
-// 16. 가변 스플리터 리사이저 & 모바일 세그먼트 전환
-// --------------------------------------------------------------------------
 function initSplitter() {
   const splitter = document.getElementById('workspaceSplitter');
   if (!splitter) return;
@@ -1972,7 +2074,6 @@ function initSplitter() {
     }
   });
 
-  // 터치 조작 지원
   splitter.addEventListener('touchstart', () => {
     isDragging = true;
     splitter.classList.add('dragging');
@@ -1999,117 +2100,420 @@ function setMobileView(view) {
 }
 
 // --------------------------------------------------------------------------
-// 17. 구글 시트 백엔드 통신 & 일괄 저장 (SAVE_CLASS_SCORES_BATCH)
+// 17. 학생 관리 & 관찰 메모 & 누적 관리
 // --------------------------------------------------------------------------
-async function callGasApi(action, payload = {}) {
-  const url = appState.settings.gasApiUrl;
-  if (!url) throw new Error("GAS API URL이 등록되지 않았습니다.");
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain' },
-    body: JSON.stringify({ action, ...payload })
+function initMemoModal() {
+  document.getElementById('btnOpenMemoModal')?.addEventListener('click', () => {
+    const student = getSelectedStudent();
+    if (!student) return;
+    const rec = getStudentRecord(student.id, appState.activeDomainId);
+    const titleEl = document.getElementById('memoStudentTitle');
+    const inputEl = document.getElementById('studentMemoInput');
+    if (titleEl) titleEl.textContent = `${student.classNum} ${student.num}번 ${student.name} (${getCurrentDomain().shortName || getCurrentDomain().name})`;
+    if (inputEl) inputEl.value = rec.memo || '';
+    openModal('memoModal');
   });
-  return await res.json();
+
+  document.querySelectorAll('.btn-tag').forEach(tagBtn => {
+    tagBtn.addEventListener('click', () => {
+      const tag = tagBtn.getAttribute('data-tag');
+      const inputEl = document.getElementById('studentMemoInput');
+      if (inputEl) {
+        inputEl.value = inputEl.value ? `${inputEl.value.trim()} ${tag}` : tag;
+        inputEl.focus();
+      }
+    });
+  });
+
+  document.getElementById('btnSaveMemo')?.addEventListener('click', () => {
+    const student = getSelectedStudent();
+    if (!student) return;
+    const memoText = document.getElementById('studentMemoInput')?.value.trim() || '';
+    updateStudentRecord(student.id, appState.activeDomainId, { memo: memoText });
+    closeAllModals();
+    renderStudentList();
+    updateActiveStudentPanel();
+    showToast("관찰 메모가 저장되었습니다.");
+  });
+
+  document.getElementById('btnDeleteMemo')?.addEventListener('click', () => {
+    const student = getSelectedStudent();
+    if (!student) return;
+    updateStudentRecord(student.id, appState.activeDomainId, { memo: '' });
+    closeAllModals();
+    renderStudentList();
+    updateActiveStudentPanel();
+    showToast("관찰 메모가 삭제되었습니다.");
+  });
 }
 
-async function fetchCloudDatabase(showToastNotice = true) {
-  if (!appState.settings.gasApiUrl) return;
-  try {
-    const res = await callGasApi('GET_INITIAL_DATA', { semester: appState.currentSemester });
-    if (res && res.success && res.students && res.students.length > 0) {
-      const sem = appState.currentSemester;
-      if (!appState.database[sem]) appState.database[sem] = { students: [], records: {} };
+function initStudentManager() {
+  document.getElementById('btnOpenStudentManager')?.addEventListener('click', () => {
+    renderManageStudentTable();
+    openModal('studentManagerModal');
+  });
 
-      // 학생 명단 동기화
-      appState.database[sem].students = res.students.map(st => ({
-        id: st.id,
-        classNum: st.classNum,
-        num: st.num,
-        name: st.name,
-        photoUrl: st.photoUrl || ''
-      }));
+  document.getElementById('btnAddStudentSubmit')?.addEventListener('click', () => {
+    const numVal = parseInt(document.getElementById('addStudentNumber')?.value);
+    const nameVal = document.getElementById('addStudentName')?.value.trim();
 
-      // 성적 기록 동기화
-      if (res.records) {
-        appState.database[sem].records = Object.assign({}, appState.database[sem].records, res.records);
-      }
+    if (!numVal || !nameVal) return alert("번호와 학생 성명을 입력하세요.");
 
-      if (res.classes && res.classes.length > 0) {
-        appState.settings.classes = res.classes;
-      }
-
-      saveLocalState();
-      renderClassTabs();
-      renderStudentList();
-      updateActiveStudentPanel();
-      if (showToastNotice) showToast("구글 시트 중앙 DB와 실시간 동기화 완료! ☁️");
-    }
-  } catch (e) {
-    console.warn("클라우드 자동 로드 실패:", e);
-  }
-}
-
-async function saveAllToGoogleSheets() {
-  const url = appState.settings.gasApiUrl;
-  if (!url) {
-    alert("먼저 [설정] 창에서 구글 앱스 스크립트(GAS) Web App API URL을 등록해주세요!");
-    openModal('settingsModal');
-    return;
-  }
-
-  const btn = document.getElementById('btnSaveAll');
-  const text = document.getElementById('saveBtnText');
-  if (btn) btn.disabled = true;
-  if (text) text.textContent = "저장중...";
-
-  try {
     const sem = appState.currentSemester;
-    const currentStudents = (appState.database[sem]?.students || []).filter(s => s.classNum === appState.activeClass);
-    const updates = [];
-
-    currentStudents.forEach(st => {
-      appState.settings.domains.forEach((d, dSeq) => {
-        const r = getStudentRecord(st.id, d.id);
-        updates.push({
-          number: st.num,
-          domainSeq: dSeq,
-          excelHeader: d.excelHeader || d.shortName || d.name,
-          t1: r.t1,
-          t2: r.t2,
-          finalScore: r.finalScore,
-          memo: r.memo || ''
-        });
-      });
+    const newId = `${appState.activeClass}-${String(numVal).padStart(2, '0')}_${Date.now()}`;
+    appState.database[sem].students.push({
+      id: newId,
+      classNum: appState.activeClass,
+      num: numVal,
+      name: nameVal,
+      photoUrl: ''
     });
 
-    const payload = {
-      semester: sem,
-      gradeClass: appState.activeClass.replace(/[^0-9]/g, ''),
-      updates: updates,
-      config: appState.settings
-    };
+    markDirty(true);
+    saveLocalState();
+    renderManageStudentTable();
+    renderStudentList();
+    showToast(`전입 학생 [${nameVal}] 등록 완료`);
 
-    const res = await callGasApi('SAVE_CLASS_SCORES_BATCH', payload);
+    document.getElementById('addStudentName').value = '';
+    document.getElementById('addStudentNumber').value = numVal + 1;
+  });
 
-    if (res && res.success) {
-      markDirty(false);
-      showToast(`${appState.activeClass} 학생 성적이 구글 시트에 안전하게 영구 저장되었습니다! 💾`);
-      feedbackAction('success');
-    } else {
-      alert("시트 저장 오류: " + (res.error || '응답 오류'));
-    }
-  } catch (err) {
-    alert("구글 시트 통신 오류: " + err.message);
-  } finally {
-    if (btn) btn.disabled = false;
-    if (text) text.textContent = "시트저장";
-  }
+  document.getElementById('btnRenumberAll')?.addEventListener('click', () => {
+    if (!confirm("현재 정렬 순서대로 1번부터 번호를 순차적으로 재부여하시겠습니까?")) return;
+    const sem = appState.currentSemester;
+    const classStudents = appState.database[sem].students.filter(s => s.classNum === appState.activeClass);
+    classStudents.forEach((s, idx) => s.num = idx + 1);
+    markDirty(true);
+    saveLocalState();
+    renderManageStudentTable();
+    renderStudentList();
+    showToast("1번부터 번호 일괄 정리가 완료되었습니다.");
+  });
+
+  document.getElementById('btnApplyStudentChanges')?.addEventListener('click', () => {
+    const sem = appState.currentSemester;
+    const numInputs = document.querySelectorAll('.table-num-input');
+    const nameInputs = document.querySelectorAll('.table-name-input');
+
+    numInputs.forEach(input => {
+      const id = input.getAttribute('data-id');
+      const st = appState.database[sem].students.find(s => s.id === id);
+      if (st) st.num = parseInt(input.value) || st.num;
+    });
+
+    nameInputs.forEach(input => {
+      const id = input.getAttribute('data-id');
+      const st = appState.database[sem].students.find(s => s.id === id);
+      if (st) st.name = input.value.trim() || st.name;
+    });
+
+    markDirty(true);
+    saveLocalState();
+    closeAllModals();
+    renderStudentList();
+    updateActiveStudentPanel();
+    showToast("순서 및 수정사항이 반영되었습니다.");
+  });
 }
 
-// --------------------------------------------------------------------------
-// 18. 키패드 독 제어 및 공통 헬퍼
-// --------------------------------------------------------------------------
+function renderManageStudentTable() {
+  const tbody = document.getElementById('manageStudentListBody');
+  const totalCountEl = document.getElementById('manageTotalCount');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  const sem = appState.currentSemester;
+  const list = (appState.database[sem]?.students || [])
+    .filter(s => s.classNum === appState.activeClass)
+    .sort((a, b) => a.num - b.num);
+
+  if (totalCountEl) totalCountEl.textContent = list.length;
+
+  list.forEach((st, idx) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="text-align:center;font-weight:bold;">${idx + 1}</td>
+      <td style="text-align:center;">${st.classNum}</td>
+      <td style="text-align:center;">
+        <input type="number" class="table-num-input" value="${st.num}" data-id="${st.id}" style="width:48px;text-align:center;border:1px solid var(--border-color);border-radius:4px;padding:2px;">
+      </td>
+      <td>
+        <input type="text" class="table-name-input" value="${st.name}" data-id="${st.id}" style="width:100%;border:1px solid var(--border-color);border-radius:4px;padding:2px 6px;">
+      </td>
+      <td style="text-align:center;">
+        <button class="btn-step-order" onclick="moveStudentRowOrder('${st.id}', -1)" title="위로">▲</button>
+        <button class="btn-step-order" onclick="moveStudentRowOrder('${st.id}', 1)" title="아래로">▼</button>
+      </td>
+      <td style="text-align:center;">
+        <button class="btn-delete-student" onclick="deleteStudentRecord('${st.id}')" style="color:var(--danger);font-weight:bold;">전출</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+window.moveStudentRowOrder = function(studentId, direction) {
+  const sem = appState.currentSemester;
+  const students = appState.database[sem].students;
+  const currentClassStudents = students.filter(s => s.classNum === appState.activeClass);
+  const idx = currentClassStudents.findIndex(s => s.id === studentId);
+  const targetIdx = idx + direction;
+
+  if (targetIdx < 0 || targetIdx >= currentClassStudents.length) return;
+
+  const temp = currentClassStudents[idx];
+  currentClassStudents[idx] = currentClassStudents[targetIdx];
+  currentClassStudents[targetIdx] = temp;
+
+  currentClassStudents.forEach((s, i) => s.num = i + 1);
+  renderManageStudentTable();
+};
+
+window.deleteStudentRecord = function(studentId) {
+  if (!confirm("해당 학생을 전출 처리(명단 삭제)하시겠습니까?")) return;
+  const sem = appState.currentSemester;
+  appState.database[sem].students = appState.database[sem].students.filter(s => s.id !== studentId);
+  markDirty(true);
+  saveLocalState();
+  renderManageStudentTable();
+  renderStudentList();
+  showToast("전출 처리가 완료되었습니다.");
+};
+
+function initDataCenter() {
+  document.getElementById('btnQuickDownload')?.addEventListener('click', () => exportDetailedAndNeisExcel());
+  document.getElementById('btnExportDetailExcel')?.addEventListener('click', () => exportDetailedAndNeisExcel());
+
+  document.getElementById('btnSwitchSemester')?.addEventListener('click', () => {
+    const sel = document.getElementById('selectSemesterList')?.value;
+    if (sel && sel !== appState.currentSemester) {
+      appState.currentSemester = sel;
+      ensureSemesterData(sel);
+      saveLocalState();
+      updateSemesterHeaderDisplay();
+      renderStudentList();
+      updateActiveStudentPanel();
+      closeAllModals();
+      showToast(`[${sel}] 학기로 전환되었습니다.`);
+    }
+  });
+
+  document.getElementById('btnOpenNewSemesterDialog')?.addEventListener('click', () => {
+    const newName = prompt("신규 생성할 학기 명칭을 입력하세요 (예: 2027학년도 1학기):");
+    if (!newName || !newName.trim()) return;
+    const trimmed = newName.trim();
+    if (appState.semesters.includes(trimmed)) return alert("이미 존재하는 학기명입니다.");
+
+    const copyPrev = confirm("기존 학기의 학생 명렬표를 그대로 복사해서 시작하시겠습니까?\n(점수는 초기화된 상태로 생성됩니다)");
+    const prevSem = appState.currentSemester;
+
+    appState.semesters.push(trimmed);
+    appState.currentSemester = trimmed;
+
+    let studentsCopy = [];
+    if (copyPrev && appState.database[prevSem]?.students) {
+      studentsCopy = appState.database[prevSem].students.map(s => ({
+        ...s,
+        photoUrl: s.photoUrl || ''
+      }));
+    }
+
+    appState.database[trimmed] = { students: studentsCopy, records: {} };
+
+    saveLocalState();
+    updateSemesterHeaderDisplay();
+    updateSemesterDropdown();
+    renderStudentList();
+    updateActiveStudentPanel();
+    closeAllModals();
+    showToast(`신규 [${trimmed}] 학기 개설 완료! 🎉`);
+  });
+
+  document.getElementById('btnRenameCurrentSemester')?.addEventListener('click', () => {
+    const current = appState.currentSemester;
+    const newName = prompt("현재 학기의 변경할 명칭을 입력하세요:", current);
+    if (!newName || !newName.trim() || newName.trim() === current) return;
+
+    const trimmed = newName.trim();
+    const idx = appState.semesters.indexOf(current);
+    if (idx !== -1) appState.semesters[idx] = trimmed;
+
+    appState.database[trimmed] = appState.database[current];
+    delete appState.database[current];
+    appState.currentSemester = trimmed;
+
+    saveLocalState();
+    updateSemesterHeaderDisplay();
+    updateSemesterDropdown();
+    showToast("학기 명칭이 변경되었습니다.");
+  });
+
+  document.getElementById('btnDeleteCurrentSemester')?.addEventListener('click', () => {
+    if (appState.semesters.length <= 1) return alert("최소 1개 이상의 학기가 유지되어야 합니다.");
+    const current = appState.currentSemester;
+    if (!confirm(`정말로 [${current}] 학기의 데이터를 영구 삭제하시겠습니까?`)) return;
+
+    delete appState.database[current];
+    appState.semesters = appState.semesters.filter(s => s !== current);
+    appState.currentSemester = appState.semesters[0];
+
+    saveLocalState();
+    updateSemesterHeaderDisplay();
+    updateSemesterDropdown();
+    renderStudentList();
+    updateActiveStudentPanel();
+    closeAllModals();
+    showToast("학기 데이터가 완전히 삭제되었습니다.");
+  });
+}
+
+function updateSemesterHeaderDisplay() {
+  const label = document.getElementById('currentSemesterText');
+  if (label) label.textContent = appState.currentSemester;
+}
+
+function updateSemesterDropdown() {
+  const sel = document.getElementById('selectSemesterList');
+  if (!sel) return;
+  sel.innerHTML = '';
+  appState.semesters.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = s;
+    if (s === appState.currentSemester) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+function exportDetailedAndNeisExcel() {
+  const sem = appState.currentSemester;
+  const currentClassStudents = (appState.database[sem]?.students || [])
+    .filter(s => s.classNum === appState.activeClass)
+    .sort((a, b) => a.num - b.num);
+
+  const curDomain = getCurrentDomain();
+  const domains = appState.settings.domains;
+
+  const detailRows = [
+    ['학기', '학급', '번호', '성명', '평가영역', '1차 시기', '2차 시기', '최종 환산점수', '비고(관찰메모)']
+  ];
+  currentClassStudents.forEach(st => {
+    const r = getStudentRecord(st.id, curDomain.id);
+    detailRows.push([
+      sem,
+      st.classNum,
+      st.num,
+      st.name,
+      curDomain.name,
+      r.t1 !== null ? (r.t1 === -1 ? '결석' : r.t1) : '',
+      r.t2 !== null ? (r.t2 === -1 ? '결석' : (r.t2 === 'pass' ? '패스' : r.t2)) : '',
+      r.finalScore !== null ? r.finalScore : '',
+      r.memo || ''
+    ]);
+  });
+
+  const neisHeader = ['반', '번호', '성명'];
+  domains.forEach(d => neisHeader.push(`${d.excelHeader || d.shortName || d.name}(${d.maxScore})`));
+  const neisRows = [neisHeader];
+
+  currentClassStudents.forEach(st => {
+    const row = [st.classNum.replace(/[^0-9]/g, ''), st.num, st.name];
+    domains.forEach(d => {
+      const r = getStudentRecord(st.id, d.id);
+      row.push(r.finalScore !== null ? r.finalScore : '');
+    });
+    neisRows.push(row);
+  });
+
+  const wb = XLSX.utils.book_new();
+  const wsDetail = XLSX.utils.aoa_to_sheet(detailRows);
+  const wsNeis = XLSX.utils.aoa_to_sheet(neisRows);
+
+  XLSX.utils.book_append_sheet(wb, wsDetail, "세부측정기록");
+  XLSX.utils.book_append_sheet(wb, wsNeis, "NEIS일괄등록");
+
+  const fileName = `[수행평가]_${appState.activeClass}_${curDomain.shortName || curDomain.name}_${Date.now()}.xlsx`;
+  XLSX.writeFile(wb, fileName);
+  showToast(`${appState.activeClass} 엑셀 다운로드 완료! 📊`);
+}
+
+function openDashboard() {
+  const sem = appState.currentSemester;
+  const students = appState.database[sem]?.students || [];
+  const curDomain = getCurrentDomain();
+
+  let totalCount = students.length;
+  let doneCount = 0;
+  let absentCount = 0;
+  let pendingCount = 0;
+
+  students.forEach(s => {
+    const r = getStudentRecord(s.id, curDomain.id);
+    if (r.t1 === -1) absentCount++;
+    else if (r.finalScore !== null) doneCount++;
+    else pendingCount++;
+  });
+
+  const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+
+  document.getElementById('statTotalStudents').textContent = `${totalCount}명`;
+  document.getElementById('statCompletedStudents').textContent = `${doneCount}명`;
+  document.getElementById('statCompletionRate').textContent = `(${rate}%)`;
+  document.getElementById('statPendingStudents').textContent = `${pendingCount}명`;
+  document.getElementById('statAbsentStudents').textContent = `${absentCount}명`;
+
+  const cardsContainer = document.getElementById('classProgressCardsContainer');
+  if (cardsContainer) {
+    cardsContainer.innerHTML = '';
+    appState.settings.classes.forEach(cName => {
+      const cStudents = students.filter(s => s.classNum === cName);
+      let cDone = 0;
+      let cUndone = [];
+      let cAbsent = [];
+
+      cStudents.forEach(st => {
+        const r = getStudentRecord(st.id, curDomain.id);
+        if (r.t1 === -1) cAbsent.push(st.name);
+        else if (r.finalScore !== null) cDone++;
+        else cUndone.push(st.name);
+      });
+
+      const cRate = cStudents.length > 0 ? Math.round((cDone / cStudents.length) * 100) : 0;
+
+      const card = document.createElement('div');
+      card.className = 'class-progress-card';
+      card.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <strong style="font-size:0.88rem;">${cName}</strong>
+          <span style="font-size:0.78rem;font-weight:900;color:var(--primary);">${cDone} / ${cStudents.length}명 (${cRate}%)</span>
+        </div>
+        <div class="progress-bar-bg" style="margin-top:4px;">
+          <div class="progress-bar-fill" style="width:${cRate}%;"></div>
+        </div>
+        <div style="font-size:0.7rem;color:var(--text-muted);margin-top:4px;">
+          미측정: <span style="color:var(--warning);font-weight:bold;">${cUndone.length > 0 ? cUndone.join(', ') : '없음'}</span>
+        </div>
+        <div style="font-size:0.7rem;color:var(--text-muted);">
+          미참여(결석): <span style="color:var(--danger);font-weight:bold;">${cAbsent.length > 0 ? cAbsent.join(', ') : '없음'}</span>
+        </div>
+        <button class="btn-tool-sub" style="margin-top:6px;width:100%;justify-content:center;" onclick="jumpToClassFromDashboard('${cName}')">이 학급으로 즉시 이동</button>
+      `;
+      cardsContainer.appendChild(card);
+    });
+  }
+
+  openModal('dashboardModal');
+}
+
+window.jumpToClassFromDashboard = function(cName) {
+  appState.activeClass = cName;
+  closeAllModals();
+  renderClassTabs();
+  updateLockUI();
+  selectFirstStudentInClass();
+};
+
 function toggleBottomKeypadDock() {
   const dock = document.getElementById('bottomKeypadDock');
   const text = document.getElementById('dockHandleText');
@@ -2163,7 +2567,7 @@ function showToast(message, duration = 2600) {
 }
 
 // --------------------------------------------------------------------------
-// 19. 환경설정 모달 & 백업/복원
+// 18. 환경설정 모달 & 백업/복원
 // --------------------------------------------------------------------------
 function initSettingsModal() {
   document.getElementById('btnOpenSettings')?.addEventListener('click', () => {
@@ -2305,7 +2709,6 @@ function applyVisualSettings() {
   html.setAttribute('data-font', appState.settings.font || 'pretendard');
 }
 
-// 사진 데이터 일체형 JSON 무손실 백업
 function initFullBackupEngine() {
   document.getElementById('btnExportFullJson')?.addEventListener('click', async () => {
     showToast("사진 데이터 패키징 중...");
@@ -2313,7 +2716,6 @@ function initFullBackupEngine() {
     const sem = appState.currentSemester;
     const backupDb = JSON.parse(JSON.stringify(appState.database));
 
-    // IndexedDB에 보관된 고화질 Base64 사진을 JSON에 전부 병합
     if (backupDb[sem]?.students) {
       for (const st of backupDb[sem].students) {
         const idbPhoto = await getPhotoFromIDB(st.id);
@@ -2360,7 +2762,6 @@ function initFullBackupEngine() {
         appState.currentSemester = parsed.currentSemester || appState.semesters[0];
         if (parsed.settings) appState.settings = Object.assign({}, defaultSettings, parsed.settings);
 
-        // 복원된 사진을 IndexedDB에 재저장
         const sem = appState.currentSemester;
         if (appState.database[sem]?.students) {
           for (const st of appState.database[sem].students) {
@@ -2387,7 +2788,7 @@ function initFullBackupEngine() {
 }
 
 // --------------------------------------------------------------------------
-// 20. 앱 부트스트랩 및 이벤트 리스너 바인딩
+// 19. 전체 이벤트 리스너 바인딩 & 초기 부트스트랩
 // --------------------------------------------------------------------------
 window.addEventListener('DOMContentLoaded', async () => {
   await initLocalStorageData();
@@ -2398,7 +2799,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   updateUndoRedoButtons();
   selectFirstStudentInClass();
 
-  // 모달 닫기
+  // 모달 닫기 버튼
   document.querySelectorAll('[data-target]').forEach(btn => {
     btn.addEventListener('click', () => {
       const targetId = btn.getAttribute('data-target');
@@ -2406,7 +2807,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  // Undo / Redo 바인딩
+  // Undo / Redo 단축키
   document.getElementById('btnUndo')?.addEventListener('click', applyUndo);
   document.getElementById('btnRedo')?.addEventListener('click', applyRedo);
   window.addEventListener('keydown', (e) => {
@@ -2420,7 +2821,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // TTS 음성 토글 버튼
+  // TTS 토글
   document.getElementById('btnToggleTts')?.addEventListener('click', () => {
     appState.ttsEnabled = !appState.ttsEnabled;
     const btn = document.getElementById('btnToggleTts');
@@ -2429,16 +2830,25 @@ window.addEventListener('DOMContentLoaded', async () => {
     feedbackAction('tap');
   });
 
-  // 모바일 뷰 전환 버튼
+  // 모바일 뷰 세그먼트 전환
   document.getElementById('btnMobileViewRoster')?.addEventListener('click', () => setMobileView('roster'));
   document.getElementById('btnMobileViewMeasure')?.addEventListener('click', () => setMobileView('measure'));
 
   // 마감 잠금 토글
   document.getElementById('btnToggleDomainLock')?.addEventListener('click', toggleDomainLock);
 
-  // 헤더 모달 버튼들
+  // 헤더 주요 버튼
   document.getElementById('btnOpenDashboard')?.addEventListener('click', openDashboard);
   document.getElementById('btnOpenVbaModal')?.addEventListener('click', () => openModal('vbaGuideModal'));
+  document.getElementById('btnCopyVbaCode')?.addEventListener('click', () => {
+    const code = document.getElementById('vbaCodeArea')?.value;
+    if (code) {
+      navigator.clipboard.writeText(code).then(() => {
+        showToast("VBA 매크로 코드가 클립보드에 복사되었습니다! 📋");
+      });
+    }
+  });
+
   document.getElementById('btnOpenDataCenter')?.addEventListener('click', () => {
     updateSemesterDropdown();
     openModal('dataCenterModal');
@@ -2490,7 +2900,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  // 시기 선택
+  // 1차/2차 시기 세그먼트
   document.querySelectorAll('#trialSegment .segment-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       appState.activeTrial = Number(btn.getAttribute('data-trial'));
@@ -2499,7 +2909,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  // 키패드 바인딩
+  // 키패드 엔진 바인딩
   document.querySelectorAll('.count-key').forEach(btn => {
     btn.addEventListener('click', () => handleKeypadInput(btn.getAttribute('data-value')));
   });
@@ -2517,10 +2927,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     moveToNextStudent(1);
   });
 
-  // 키패드 독 접기/펼치기
+  // 우측 격리 키패드 독 접기/펼치기
   document.getElementById('btnToggleKeypadDock')?.addEventListener('click', toggleBottomKeypadDock);
 
-  // 개별 모듈 초기화
+  // 개별 모듈 이벤트 등록
   document.getElementById('btnOpenPhotoStudio')?.addEventListener('click', openPhotoStudio);
   initCanvasStudioEvents();
   initIntegratedRosterUploader();
