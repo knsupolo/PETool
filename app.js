@@ -1,26 +1,35 @@
 /* ==========================================================================
-   수행평가 입력기 Pro (v2.0) - 핵심 통합 제어 스크립트 (app.js)
-   측정 엔진, 키패드, 캔버스 스튜디오, JSZip 엑셀 파서, Undo/Redo, GAS API 연동
+   수행평가 입력기 Pro (v4.0 Pro) - 핵심 통합 제어 엔진 (app.js)
+   - 0ms 반응형 측정 엔진, 1차 만점 2차 자동 패스 & 0ms 커서 이동
+   - 글래스모피즘 슬림 접이식 키패드 독 제어
+   - 캔버스 사진 스튜디오 (Scale X/Y 40%~250%, 8종 감성 필터, 드래그 Pan)
+   - JSZip 엑셀 사진 일괄 파서 & 명렬표 병합(Merge) 업로더
+   - 세부기록+NEIS 일체형 엑셀 다운로드 및 역반영 업로드
+   - 12종 테마, 6종 배경, 8종 한글 웹폰트 & 전체 JSON 백업/복원
+   - GAS Web App RESTful JSON API 연동
    ========================================================================== */
 
 // --------------------------------------------------------------------------
 // 1. 전역 상태 관리 (State Management)
 // --------------------------------------------------------------------------
-const APP_STORAGE_KEY = 'PE_EVAL_PRO_V2_DATA';
-const SETTINGS_STORAGE_KEY = 'PE_EVAL_PRO_V2_SETTINGS';
+const APP_STORAGE_KEY = 'PE_EVAL_PRO_V4_DATA';
+const SETTINGS_STORAGE_KEY = 'PE_EVAL_PRO_V4_SETTINGS';
 
 const defaultSettings = {
   gasApiUrl: 'https://script.google.com/macros/s/AKfycbxP_C6mySgyfnH8ePxVqZ2f67VHdo6eK0TNYcmWdO7xMPjfxTRtnW7_ct_g7MaXA0-aHw/exec',
+  appTitle: '수행평가 입력기 Pro',
   theme: 'indigo',
   bg: 'slate',
   font: 'pretendard',
   classes: ['1반', '2반', '3반', '4반', '5반'],
   domains: [
     {
-      key: 'table_tennis',
-      name: '탁구 포핸드',
+      id: 'domain_table_tennis',
+      name: '탁구 포핸드 리시브',
+      shortName: '탁구 포핸드',
+      excelHeader: '탁구포핸드',
       maxScore: 20,
-      absentScore: 0,
+      absentScore: 7,
       criteria: [
         { count: 10, score: 20 },
         { count: 8, score: 18 },
@@ -31,10 +40,12 @@ const defaultSettings = {
       ]
     },
     {
-      key: 'big_volleyball',
+      id: 'domain_big_volleyball',
       name: '빅발리볼 서브',
+      shortName: '빅발리볼 서브',
+      excelHeader: '빅발리볼서브',
       maxScore: 20,
-      absentScore: 0,
+      absentScore: 7,
       criteria: [
         { count: 5, score: 20 },
         { count: 4, score: 18 },
@@ -45,21 +56,22 @@ const defaultSettings = {
       ]
     }
   ],
-  lockedDomains: {} // 예: { '2026-2_1반_table_tennis': true }
+  lockedDomains: {} // 예: { '2026-2_1반_domain_table_tennis': true }
 };
 
 let appState = {
   currentSemester: '2026학년도 2학기',
   semesters: ['2026학년도 1학기', '2026학년도 2학기'],
   activeClass: '1반',
-  activeDomainKey: 'table_tennis',
+  activeDomainId: 'domain_table_tennis',
   activeTrial: 1,
   selectedStudentId: null,
-  activeFilter: 'all',
+  activeFilter: 'all', // all, done, undone, absent
   searchQuery: '',
   isDirty: false,
+  isDockCollapsed: false,
   settings: { ...defaultSettings },
-  // 학기별 데이터 분리 저장: { [학기명]: { students: [...], records: { [학번_종목]: { t1, t2, score, memo } } } }
+  // { [학기명]: { students: [...], records: { [학번_종목ID]: { t1, t2, finalScore, memo } } } }
   database: {}
 };
 
@@ -68,7 +80,7 @@ let undoStack = [];
 let redoStack = [];
 const MAX_HISTORY = 30;
 
-// 오디오 컨텍스트 (비프음 피드백)
+// 웹 오디오 엔진
 let audioCtx = null;
 
 // 캔버스 사진 스튜디오 전역 변수
@@ -87,7 +99,7 @@ let studioState = {
 };
 
 // --------------------------------------------------------------------------
-// 2. 사운드 & 햅틱 피드백 엔진
+// 2. 비프음 & 햅틱 피드백 엔진
 // --------------------------------------------------------------------------
 function initAudio() {
   if (!audioCtx) {
@@ -99,7 +111,7 @@ function initAudio() {
   }
 }
 
-function playBeep(freq = 520, duration = 0.05, type = 'sine') {
+function playBeep(freq = 540, duration = 0.04, type = 'sine') {
   try {
     initAudio();
     if (!audioCtx) return;
@@ -107,7 +119,7 @@ function playBeep(freq = 520, duration = 0.05, type = 'sine') {
     const gain = audioCtx.createGain();
     osc.type = type;
     osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-    gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.07, audioCtx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
     osc.connect(gain);
     gain.connect(audioCtx.destination);
@@ -116,19 +128,19 @@ function playBeep(freq = 520, duration = 0.05, type = 'sine') {
   } catch (e) {}
 }
 
-function triggerHaptic(ms = 15) {
+function triggerHaptic(ms = 12) {
   if (navigator.vibrate) {
     try { navigator.vibrate(ms); } catch (e) {}
   }
 }
 
 function feedbackAction(type = 'tap') {
-  triggerHaptic(type === 'error' ? [30, 40, 30] : 12);
-  if (type === 'tap') playBeep(580, 0.04);
-  else if (type === 'success') playBeep(780, 0.08);
-  else if (type === 'pass') playBeep(440, 0.06);
-  else if (type === 'clear') playBeep(320, 0.06);
-  else if (type === 'error') playBeep(240, 0.12, 'sawtooth');
+  triggerHaptic(type === 'error' ? [30, 40, 30] : (type === 'success' ? [15, 20, 15] : 10));
+  if (type === 'tap') playBeep(560, 0.04);
+  else if (type === 'success') playBeep(760, 0.08);
+  else if (type === 'pass') playBeep(430, 0.05);
+  else if (type === 'clear') playBeep(310, 0.05);
+  else if (type === 'error') playBeep(220, 0.12, 'sawtooth');
 }
 
 // --------------------------------------------------------------------------
@@ -138,7 +150,7 @@ function initLocalStorageData() {
   const savedSettings = localStorage.getItem(SETTINGS_STORAGE_KEY);
   if (savedSettings) {
     try {
-      appState.settings = JSON.parse(savedSettings);
+      appState.settings = Object.assign({}, defaultSettings, JSON.parse(savedSettings));
     } catch (e) {
       appState.settings = { ...defaultSettings };
     }
@@ -160,6 +172,7 @@ function initLocalStorageData() {
 
   ensureSemesterData(appState.currentSemester);
   applyVisualSettings();
+  updateMainTitleDisplay();
 }
 
 function ensureSemesterData(semester) {
@@ -169,7 +182,7 @@ function ensureSemesterData(semester) {
       records: {}
     };
   }
-  // 기본 학생 데이터가 없으면 예시 데이터 생성
+  // 기본 학생 데이터 생성 (20명)
   if (appState.database[semester].students.length === 0) {
     const list = [];
     appState.settings.classes.forEach(cName => {
@@ -179,8 +192,7 @@ function ensureSemesterData(semester) {
           classNum: cName,
           num: i,
           name: `학생${i}`,
-          photoUrl: '',
-          memo: ''
+          photoUrl: ''
         });
       }
     });
@@ -211,6 +223,14 @@ function markDirty(dirty = true) {
     if (dirty) badge.classList.remove('hidden');
     else badge.classList.add('hidden');
   }
+}
+
+function updateMainTitleDisplay() {
+  const title = appState.settings.appTitle || '수행평가 입력기 Pro';
+  const disp = document.getElementById('appMainTitleDisplay');
+  const input = document.getElementById('appMainTitleInput');
+  if (disp) disp.textContent = title;
+  if (input) input.value = title;
 }
 
 // --------------------------------------------------------------------------
@@ -268,17 +288,16 @@ function updateUndoRedoButtons() {
 // 5. 평가 연산 및 배점 매핑 엔진
 // --------------------------------------------------------------------------
 function getCurrentDomain() {
-  return appState.settings.domains.find(d => d.key === appState.activeDomainKey) || appState.settings.domains[0];
+  return appState.settings.domains.find(d => d.id === appState.activeDomainId) || appState.settings.domains[0];
 }
 
 function calculateScoreFromCount(count, domain) {
   if (count === -1) return domain.absentScore !== undefined ? domain.absentScore : 0;
-  if (count === null || count === undefined || count === '' || count === '-') return null;
+  if (count === null || count === undefined || count === '' || count === '-' || count === 'pass') return null;
 
   const numericCount = Number(count);
   if (isNaN(numericCount)) return null;
 
-  // 배점 기준 정렬 (성공 횟수 내림차순)
   const sortedCriteria = [...domain.criteria].sort((a, b) => b.count - a.count);
   for (const c of sortedCriteria) {
     if (numericCount >= c.count) return c.score;
@@ -286,31 +305,30 @@ function calculateScoreFromCount(count, domain) {
   return domain.absentScore !== undefined ? domain.absentScore : 0;
 }
 
-function getStudentRecord(studentId, domainKey) {
+function getStudentRecord(studentId, domainId) {
   const currentSem = appState.currentSemester;
-  const key = `${studentId}_${domainKey}`;
+  const key = `${studentId}_${domainId}`;
   const rec = (appState.database[currentSem] && appState.database[currentSem].records)
     ? appState.database[currentSem].records[key]
     : null;
   return rec || { t1: null, t2: null, finalScore: null, memo: '' };
 }
 
-function updateStudentRecord(studentId, domainKey, newValues) {
+function updateStudentRecord(studentId, domainId, newValues) {
   pushHistorySnapshot();
   const currentSem = appState.currentSemester;
   if (!appState.database[currentSem].records) appState.database[currentSem].records = {};
 
-  const key = `${studentId}_${domainKey}`;
+  const key = `${studentId}_${domainId}`;
   const existing = appState.database[currentSem].records[key] || { t1: null, t2: null, finalScore: null, memo: '' };
   const updated = { ...existing, ...newValues };
 
-  // 최종 환산 점수 재계산
   const domain = getCurrentDomain();
   const s1 = calculateScoreFromCount(updated.t1, domain);
   const s2 = calculateScoreFromCount(updated.t2, domain);
 
   if (updated.t1 === -1 && (updated.t2 === -1 || updated.t2 === null)) {
-    updated.finalScore = domain.absentScore || 0;
+    updated.finalScore = domain.absentScore !== undefined ? domain.absentScore : 0;
   } else if (s1 !== null && s2 !== null) {
     updated.finalScore = Math.max(s1, s2);
   } else if (s1 !== null) {
@@ -326,13 +344,13 @@ function updateStudentRecord(studentId, domainKey, newValues) {
   saveLocalState();
 }
 
-function isDomainLocked(classNum, domainKey) {
-  const lockKey = `${appState.currentSemester}_${classNum}_${domainKey}`;
+function isDomainLocked(classNum, domainId) {
+  const lockKey = `${appState.currentSemester}_${classNum}_${domainId}`;
   return !!appState.settings.lockedDomains[lockKey];
 }
 
 function toggleDomainLock() {
-  const lockKey = `${appState.currentSemester}_${appState.activeClass}_${appState.activeDomainKey}`;
+  const lockKey = `${appState.currentSemester}_${appState.activeClass}_${appState.activeDomainId}`;
   const currentStatus = !!appState.settings.lockedDomains[lockKey];
   appState.settings.lockedDomains[lockKey] = !currentStatus;
   saveLocalState();
@@ -342,7 +360,7 @@ function toggleDomainLock() {
 }
 
 function updateLockUI() {
-  const locked = isDomainLocked(appState.activeClass, appState.activeDomainKey);
+  const locked = isDomainLocked(appState.activeClass, appState.activeDomainId);
   const btn = document.getElementById('btnToggleDomainLock');
   const icon = document.getElementById('domainLockIcon');
   const text = document.getElementById('domainLockText');
@@ -390,10 +408,10 @@ function renderDomainTabs() {
 
   appState.settings.domains.forEach(d => {
     const btn = document.createElement('button');
-    btn.className = `domain-tab-btn ${d.key === appState.activeDomainKey ? 'active' : ''}`;
-    btn.textContent = d.name;
+    btn.className = `domain-tab-btn ${d.id === appState.activeDomainId ? 'active' : ''}`;
+    btn.textContent = d.shortName || d.name;
     btn.onclick = () => {
-      appState.activeDomainKey = d.key;
+      appState.activeDomainId = d.id;
       feedbackAction('tap');
       renderDomainTabs();
       updateLockUI();
@@ -417,7 +435,7 @@ function renderCriteriaChips() {
   sorted.forEach(c => {
     const chip = document.createElement('span');
     chip.className = 'criteria-mini-chip';
-    chip.textContent = `${c.count}회 : ${c.score}점`;
+    chip.textContent = `${c.count}회:${c.score}점`;
     container.appendChild(chip);
   });
 }
@@ -433,7 +451,7 @@ function getFilteredStudents() {
       const matchNum = String(st.num).includes(q);
       if (!matchName && !matchNum) return false;
     }
-    const rec = getStudentRecord(st.id, appState.activeDomainKey);
+    const rec = getStudentRecord(st.id, appState.activeDomainId);
     const isDone = rec.finalScore !== null && rec.t1 !== -1;
     const isAbsent = rec.t1 === -1;
     const isUndone = rec.finalScore === null;
@@ -454,10 +472,10 @@ function renderStudentList() {
   const allClassStudents = (appState.database[sem]?.students || []).filter(s => s.classNum === appState.activeClass);
   const filtered = getFilteredStudents();
 
-  // 필터 카운트 갱신
+  // 필터 카운터 동기화
   let doneCnt = 0, absentCnt = 0, undoneCnt = 0;
   allClassStudents.forEach(st => {
-    const r = getStudentRecord(st.id, appState.activeDomainKey);
+    const r = getStudentRecord(st.id, appState.activeDomainId);
     if (r.t1 === -1) absentCnt++;
     else if (r.finalScore !== null) doneCnt++;
     else undoneCnt++;
@@ -473,17 +491,16 @@ function renderStudentList() {
   if (elAbsent) elAbsent.textContent = absentCnt;
 
   filtered.forEach(student => {
-    const rec = getStudentRecord(student.id, appState.activeDomainKey);
+    const rec = getStudentRecord(student.id, appState.activeDomainId);
     const isSelected = student.id === appState.selectedStudentId;
 
     const card = document.createElement('div');
     card.className = `student-card ${isSelected ? 'active-card' : ''}`;
     card.id = `studentCard_${student.id}`;
 
-    // 상태 배지 판별
     let badgeHtml = '';
     if (rec.t1 === -1) {
-      badgeHtml = `<span class="card-badge absent">결석</span>`;
+      badgeHtml = `<span class="card-badge absent">미참여</span>`;
     } else if (rec.finalScore !== null) {
       badgeHtml = `<span class="card-badge done">${rec.finalScore}점</span>`;
     } else {
@@ -502,9 +519,9 @@ function renderStudentList() {
           ${hasMemo ? `<span class="memo-dot" style="position:static;display:inline-block;" title="${rec.memo}"></span>` : ''}
         </div>
         <div class="card-scores-row">
-          <span>1차: ${rec.t1 !== null ? rec.t1 : '-'}</span>
+          <span>1차: ${rec.t1 !== null ? (rec.t1 === -1 ? '결석' : rec.t1) : '-'}</span>
           <span>·</span>
-          <span>2차: ${rec.t2 !== null ? rec.t2 : '-'}</span>
+          <span>2차: ${rec.t2 !== null ? (rec.t2 === -1 ? '결석' : (rec.t2 === 'pass' ? '패스' : rec.t2)) : '-'}</span>
         </div>
       </div>
       ${badgeHtml}
@@ -583,7 +600,7 @@ function updateActiveStudentPanel() {
     return;
   }
 
-  const rec = getStudentRecord(student.id, appState.activeDomainKey);
+  const rec = getStudentRecord(student.id, appState.activeDomainId);
 
   if (nameEl) nameEl.textContent = student.name;
   if (classEl) classEl.textContent = student.classNum;
@@ -596,7 +613,7 @@ function updateActiveStudentPanel() {
   if (statusBadge) {
     if (rec.t1 === -1) {
       statusBadge.className = 'status-badge card-badge absent';
-      statusBadge.textContent = '결석';
+      statusBadge.textContent = '미참여(결석)';
     } else if (rec.finalScore !== null) {
       statusBadge.className = 'status-badge card-badge done';
       statusBadge.textContent = `${rec.finalScore}점 완료`;
@@ -647,11 +664,11 @@ function updateTrialSegmentUI() {
   });
 }
 
-// 온스크린 키패드 입력 핸들러
+// 0ms 고속 키패드 입력 핸들러
 function handleKeypadInput(value) {
   const student = getSelectedStudent();
   if (!student) return;
-  if (isDomainLocked(appState.activeClass, appState.activeDomainKey)) {
+  if (isDomainLocked(appState.activeClass, appState.activeDomainId)) {
     feedbackAction('error');
     showToast("입력이 마감되어 기록을 변경할 수 없습니다.");
     return;
@@ -662,31 +679,28 @@ function handleKeypadInput(value) {
   const trial = appState.activeTrial;
 
   if (value === 'pass') {
-    // 2차 시기 수동 패스 처리
     if (trial === 1) {
       showToast("패스는 2차 시기에 적용됩니다.");
       appState.activeTrial = 2;
     }
-    updateStudentRecord(student.id, appState.activeDomainKey, { t2: 'pass' });
+    updateStudentRecord(student.id, appState.activeDomainId, { t2: 'pass' });
     feedbackAction('pass');
     moveToNextStudent(1);
     return;
   }
 
   if (value === 'absent') {
-    // 결석 처리 (-1)
-    updateStudentRecord(student.id, appState.activeDomainKey, { t1: -1, t2: -1 });
+    updateStudentRecord(student.id, appState.activeDomainId, { t1: -1, t2: -1 });
     feedbackAction('clear');
     moveToNextStudent(1);
     return;
   }
 
   if (value === 'clear') {
-    // 기록 초기화
     if (trial === 1) {
-      updateStudentRecord(student.id, appState.activeDomainKey, { t1: null, t2: null });
+      updateStudentRecord(student.id, appState.activeDomainId, { t1: null, t2: null });
     } else {
-      updateStudentRecord(student.id, appState.activeDomainKey, { t2: null });
+      updateStudentRecord(student.id, appState.activeDomainId, { t2: null });
     }
     feedbackAction('clear');
     renderStudentList();
@@ -694,30 +708,27 @@ function handleKeypadInput(value) {
     return;
   }
 
-  // 일반 숫자 입력 (0 ~ 10)
   const count = Number(value);
   const score = calculateScoreFromCount(count, domain);
 
   if (trial === 1) {
-    // 1차 시기 만점 달성 시 2차 자동 패스 및 다음 학생 이동
+    // 1차 시기 만점 달성 시 2차 시기 자동 '패스' 처리 및 0ms 다음 학생 1차 시기로 직행
     if (autoPass && score >= domain.maxScore) {
-      updateStudentRecord(student.id, appState.activeDomainKey, { t1: count, t2: 'pass' });
+      updateStudentRecord(student.id, appState.activeDomainId, { t1: count, t2: 'pass' });
       feedbackAction('success');
       showToast(`${student.name} 1차 만점! 2차 자동 패스되었습니다.`);
       moveToNextStudent(1);
       return;
     } else {
-      updateStudentRecord(student.id, appState.activeDomainKey, { t1: count });
+      updateStudentRecord(student.id, appState.activeDomainId, { t1: count });
       feedbackAction('tap');
-      // 만점이 아니면 2차 시기로 즉시 전환
       appState.activeTrial = 2;
       renderStudentList();
       updateActiveStudentPanel();
       return;
     }
   } else {
-    // 2차 시기 기록 입력 후 다음 학생 1차 시기로 이동
-    updateStudentRecord(student.id, appState.activeDomainKey, { t2: count });
+    updateStudentRecord(student.id, appState.activeDomainId, { t2: count });
     feedbackAction('tap');
     moveToNextStudent(1);
   }
@@ -743,13 +754,12 @@ function moveToNextStudent(step = 1) {
   renderStudentList();
   updateActiveStudentPanel();
 
-  // 자동 스크롤
   const card = document.getElementById(`studentCard_${appState.selectedStudentId}`);
   if (card) card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 // --------------------------------------------------------------------------
-// 8. 캔버스 사진 스튜디오 & 필터 엔진
+// 8. 캔버스 사진 스튜디오 (Scale X/Y & 8종 감성 필터 엔진)
 // --------------------------------------------------------------------------
 function openPhotoStudio() {
   const student = getSelectedStudent();
@@ -806,7 +816,6 @@ function renderStudioCanvas() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.save();
 
-  // 중앙 기준 변형 적용
   ctx.translate(canvas.width / 2 + studioState.panX, canvas.height / 2 + studioState.panY);
   ctx.rotate((studioState.rotation * Math.PI) / 180);
   ctx.scale((studioState.zoom / 100) * (studioState.scaleX / 100), (studioState.zoom / 100) * (studioState.scaleY / 100));
@@ -814,17 +823,16 @@ function renderStudioCanvas() {
   const imgW = studioImage.width || 400;
   const imgH = studioImage.height || 400;
   const aspect = imgW / imgH;
-  let drawW = 320;
-  let drawH = 320 / aspect;
-  if (drawH < 320) {
-    drawH = 320;
-    drawW = 320 * aspect;
+  let drawW = 300;
+  let drawH = 300 / aspect;
+  if (drawH < 300) {
+    drawH = 300;
+    drawW = 300 * aspect;
   }
 
   ctx.drawImage(studioImage, -drawW / 2, -drawH / 2, drawW, drawH);
   ctx.restore();
 
-  // 8종 필터 픽셀 연산 적용
   if (studioState.filter !== 'normal') {
     applyCanvasFilterMath(ctx, canvas.width, canvas.height, studioState.filter);
   }
@@ -896,7 +904,6 @@ function initCanvasStudioEvents() {
   window.addEventListener('touchmove', onMove, { passive: false });
   window.addEventListener('touchend', onEnd);
 
-  // 슬라이더 바인딩
   document.getElementById('zoomSlider')?.addEventListener('input', (e) => {
     studioState.zoom = Number(e.target.value);
     document.getElementById('zoomVal').textContent = `${studioState.zoom}%`;
@@ -913,7 +920,6 @@ function initCanvasStudioEvents() {
     renderStudioCanvas();
   });
 
-  // 회전 및 리셋
   document.getElementById('btnRotate90')?.addEventListener('click', () => {
     studioState.rotation = (studioState.rotation + 90) % 360;
     renderStudioCanvas();
@@ -929,7 +935,6 @@ function initCanvasStudioEvents() {
     renderStudioCanvas();
   });
 
-  // 필터 버튼 클릭
   document.querySelectorAll('.filter-pill').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.filter-pill').forEach(b => b.classList.remove('active'));
@@ -939,7 +944,6 @@ function initCanvasStudioEvents() {
     });
   });
 
-  // 파일 업로드 (카메라/앨범)
   const handleImageFile = (file) => {
     if (!file) return;
     const reader = new FileReader();
@@ -958,7 +962,6 @@ function initCanvasStudioEvents() {
   document.getElementById('cameraFileInput')?.addEventListener('change', (e) => handleImageFile(e.target.files[0]));
   document.getElementById('albumFileInput')?.addEventListener('change', (e) => handleImageFile(e.target.files[0]));
 
-  // 적용 및 저장
   document.getElementById('btnSaveStudioAvatar')?.addEventListener('click', async () => {
     const student = getSelectedStudent();
     if (!student) return;
@@ -973,23 +976,23 @@ function initCanvasStudioEvents() {
     closeAllModals();
     showToast(`${student.name} 프로필 사진이 저장되었습니다.`);
 
-    // GAS 백엔드 연동 시 비동기 클라우드 드라이브 백업
+    // 백엔드 API 연동 시 사진 업로드
     if (appState.settings.gasApiUrl) {
-      callGasApi('UPLOAD_STUDENT_AVATAR', {
-        studentId: student.id,
+      callGasApi('SAVE_STUDENT_AVATAR', {
+        semester: appState.currentSemester,
+        gradeClass: student.classNum.replace(/[^0-9]/g, ''),
+        number: student.num,
         name: student.name,
-        classNum: student.classNum,
         base64Data: base64
       }).then(res => {
-        if (res && res.fileUrl) {
-          student.photoUrl = res.fileUrl;
+        if (res && res.avatarUrl) {
+          student.photoUrl = res.avatarUrl;
           saveLocalState();
         }
       }).catch(() => {});
     }
   });
 
-  // 사진 삭제
   document.getElementById('btnDeleteCurrentAvatar')?.addEventListener('click', () => {
     const student = getSelectedStudent();
     if (!student) return;
@@ -1001,12 +1004,20 @@ function initCanvasStudioEvents() {
       updateActiveStudentPanel();
       closeAllModals();
       showToast("프로필 사진이 삭제되었습니다.");
+
+      if (appState.settings.gasApiUrl) {
+        callGasApi('DELETE_STUDENT_AVATAR', {
+          semester: appState.currentSemester,
+          gradeClass: student.classNum.replace(/[^0-9]/g, ''),
+          number: student.num
+        }).catch(() => {});
+      }
     }
   });
 }
 
 // --------------------------------------------------------------------------
-// 9. JSZip 기반 사진 명렬표 엑셀 일괄 등록 & VBA 가이드
+// 9. JSZip 엑셀 사진 일괄 파서 & 명렬표 병합(Merge) 업로더
 // --------------------------------------------------------------------------
 function initBulkPhotoUploader() {
   const dropZone = document.getElementById('bulkDropZone');
@@ -1024,8 +1035,8 @@ function initBulkPhotoUploader() {
     if (e.target.files.length > 0) processBulkExcelFile(e.target.files[0]);
   });
 
-  // VBA 매크로 복사 모달
-  document.getElementById('btnOpenVbaModal')?.addEventListener('click', () => {
+  document.getElementById('btnOpenVbaFromBulk')?.addEventListener('click', () => {
+    closeAllModals();
     openModal('vbaGuideModal');
   });
   document.getElementById('btnCopyVbaCode')?.addEventListener('click', () => {
@@ -1050,13 +1061,12 @@ async function processBulkExcelFile(file) {
   if (pWrap) pWrap.classList.remove('hidden');
 
   try {
-    pText.textContent = "엑셀 파일 읽는 중...";
+    pText.textContent = "엑셀 압축 파일 파싱 중...";
     pBar.style.width = "20%";
 
     const arrayBuffer = await file.arrayBuffer();
     const zip = await JSZip.loadAsync(arrayBuffer);
 
-    // 엑셀 내 이미지 추출 (/xl/media/)
     const mediaFiles = Object.keys(zip.files).filter(fileName => fileName.startsWith('xl/media/'));
     if (mediaFiles.length === 0) {
       alert("엑셀 파일 내에 포함된 학생 사진을 찾을 수 없습니다.");
@@ -1065,9 +1075,8 @@ async function processBulkExcelFile(file) {
     }
 
     pText.textContent = `사진 ${mediaFiles.length}장 추출 및 번호 매칭 중...`;
-    pBar.style.width = "50%";
+    pBar.style.width = "40%";
 
-    // 파일명 기준 정렬 (image1, image2, ...)
     mediaFiles.sort((a, b) => {
       const numA = parseInt(a.replace(/[^0-9]/g, '')) || 0;
       const numB = parseInt(b.replace(/[^0-9]/g, '')) || 0;
@@ -1080,6 +1089,8 @@ async function processBulkExcelFile(file) {
       .sort((a, b) => a.num - b.num);
 
     let matchCount = 0;
+    const avatarBatch = [];
+
     for (let i = 0; i < Math.min(mediaFiles.length, classStudents.length); i++) {
       const fName = mediaFiles[i];
       const imgBlob = await zip.files[fName].async('blob');
@@ -1090,8 +1101,13 @@ async function processBulkExcelFile(file) {
       });
 
       classStudents[i].photoUrl = base64Data;
+      avatarBatch.push({
+        number: classStudents[i].num,
+        name: classStudents[i].name,
+        base64Data: base64Data
+      });
       matchCount++;
-      pBar.style.width = `${50 + Math.round((i / classStudents.length) * 45)}%`;
+      pBar.style.width = `${40 + Math.round((i / classStudents.length) * 55)}%`;
     }
 
     markDirty(true);
@@ -1100,7 +1116,25 @@ async function processBulkExcelFile(file) {
     updateActiveStudentPanel();
 
     pBar.style.width = "100%";
-    pText.textContent = `매칭 완료! (${matchCount}명 사진 등록됨)`;
+    pText.textContent = `완료! (${matchCount}명 매칭 성공)`;
+
+    // GAS 백엔드 일괄 업로드 연동
+    if (appState.settings.gasApiUrl && avatarBatch.length > 0) {
+      callGasApi('SAVE_BATCH_AVATARS', {
+        semester: appState.currentSemester,
+        gradeClass: appState.activeClass.replace(/[^0-9]/g, ''),
+        avatarBatch: avatarBatch
+      }).then(res => {
+        if (res && res.savedResults) {
+          classStudents.forEach(st => {
+            if (res.savedResults[st.num]) st.photoUrl = res.savedResults[st.num];
+          });
+          saveLocalState();
+          renderStudentList();
+        }
+      }).catch(() => {});
+    }
+
     setTimeout(() => {
       closeAllModals();
       showToast(`${appState.activeClass} 학생 ${matchCount}명의 사진이 성공적으로 일괄 등록되었습니다! 📸`);
@@ -1112,28 +1146,124 @@ async function processBulkExcelFile(file) {
   }
 }
 
+// 엑셀 명렬표 파일 추가 (기존 데이터와 병합 Merge)
+function initRosterAdder() {
+  const dropZone = document.getElementById('rosterDropZone');
+  const fileInput = document.getElementById('rosterExcelFileInput');
+
+  dropZone?.addEventListener('click', () => fileInput?.click());
+  dropZone?.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = 'var(--primary)'; });
+  dropZone?.addEventListener('dragleave', () => { dropZone.style.borderColor = 'var(--primary-border)'; });
+  dropZone?.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.style.borderColor = 'var(--primary-border)';
+    if (e.dataTransfer.files.length > 0) processRosterExcelMerge(e.dataTransfer.files[0]);
+  });
+  fileInput?.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) processRosterExcelMerge(e.target.files[0]);
+  });
+}
+
+async function processRosterExcelMerge(file) {
+  if (!file) return;
+  try {
+    const data = await file.arrayBuffer();
+    const wb = XLSX.read(data, { type: 'array' });
+    const firstSheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+
+    if (rows.length < 2) {
+      alert("엑셀 데이터가 비어 있습니다.");
+      return;
+    }
+
+    // 열 인덱스 자동 감지 (반, 번호, 성명)
+    let colClass = -1, colNum = -1, colName = -1;
+    let headerRowIdx = 0;
+
+    for (let i = 0; i < Math.min(10, rows.length); i++) {
+      const row = rows[i];
+      if (!row) continue;
+      for (let c = 0; c < row.length; c++) {
+        const val = String(row[c] || '').trim();
+        if (val.includes('학급') || val.includes('반')) colClass = c;
+        if (val.includes('번호')) colNum = c;
+        if (val.includes('성명') || val.includes('이름')) colName = c;
+      }
+      if (colNum !== -1 && colName !== -1) {
+        headerRowIdx = i;
+        break;
+      }
+    }
+
+    if (colNum === -1 || colName === -1) {
+      colClass = 1; colNum = 2; colName = 3; // 기본값
+    }
+
+    const sem = appState.currentSemester;
+    const existingStudents = appState.database[sem]?.students || [];
+    let addedCount = 0;
+    const newClassSet = new Set(appState.settings.classes);
+
+    for (let r = headerRowIdx + 1; r < rows.length; r++) {
+      const row = rows[r];
+      if (!row || !row[colName]) continue;
+
+      let cVal = colClass !== -1 && row[colClass] ? String(row[colClass]).trim() : appState.activeClass;
+      if (!cVal.includes('반')) cVal = `${cVal}반`;
+      const numVal = parseInt(row[colNum]) || (r - headerRowIdx);
+      const nameVal = String(row[colName]).trim();
+
+      newClassSet.add(cVal);
+
+      // 기존 학생 여부 확인 후 병합
+      const found = existingStudents.find(s => s.classNum === cVal && s.num === numVal);
+      if (found) {
+        found.name = nameVal;
+      } else {
+        existingStudents.push({
+          id: `${cVal}-${String(numVal).padStart(2, '0')}`,
+          classNum: cVal,
+          num: numVal,
+          name: nameVal,
+          photoUrl: ''
+        });
+        addedCount++;
+      }
+    }
+
+    appState.settings.classes = Array.from(newClassSet).sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0));
+    existingStudents.sort((a, b) => (parseInt(a.classNum) || 0) - (parseInt(b.classNum) || 0) || a.num - b.num);
+
+    markDirty(true);
+    saveLocalState();
+    renderClassTabs();
+    renderStudentList();
+    updateActiveStudentPanel();
+    closeAllModals();
+    showToast(`명렬표 파일이 성공적으로 병합되었습니다! (${addedCount}명 추가/갱신) 📑`);
+  } catch (err) {
+    alert("명렬표 엑셀 분석 오류: " + err.message);
+  }
+}
+
 // --------------------------------------------------------------------------
-// 10. 학생 관찰 메모 모달
+// 10. 학생 관찰 메모 & 학생 명단 관리 (전입/전출/재배치)
 // --------------------------------------------------------------------------
 function initMemoModal() {
-  const btnOpen = document.getElementById('btnOpenMemoModal');
-  const btnSave = document.getElementById('btnSaveMemo');
-  const btnDelete = document.getElementById('btnDeleteMemo');
-
-  btnOpen?.addEventListener('click', () => {
+  document.getElementById('btnOpenMemoModal')?.addEventListener('click', () => {
     const student = getSelectedStudent();
     if (!student) return;
-    const rec = getStudentRecord(student.id, appState.activeDomainKey);
+    const rec = getStudentRecord(student.id, appState.activeDomainId);
 
     const titleEl = document.getElementById('memoStudentTitle');
     const inputEl = document.getElementById('studentMemoInput');
-    if (titleEl) titleEl.textContent = `${student.classNum} ${student.num}번 ${student.name} (${getCurrentDomain().name})`;
+    if (titleEl) titleEl.textContent = `${student.classNum} ${student.num}번 ${student.name} (${getCurrentDomain().shortName || getCurrentDomain().name})`;
     if (inputEl) inputEl.value = rec.memo || '';
 
     openModal('memoModal');
   });
 
-  // 빠른 태그 클릭 시 인풋에 태그 추가
   document.querySelectorAll('.btn-tag').forEach(tagBtn => {
     tagBtn.addEventListener('click', () => {
       const tag = tagBtn.getAttribute('data-tag');
@@ -1145,21 +1275,21 @@ function initMemoModal() {
     });
   });
 
-  btnSave?.addEventListener('click', () => {
+  document.getElementById('btnSaveMemo')?.addEventListener('click', () => {
     const student = getSelectedStudent();
     if (!student) return;
     const memoText = document.getElementById('studentMemoInput')?.value.trim() || '';
-    updateStudentRecord(student.id, appState.activeDomainKey, { memo: memoText });
+    updateStudentRecord(student.id, appState.activeDomainId, { memo: memoText });
     closeAllModals();
     renderStudentList();
     updateActiveStudentPanel();
     showToast("관찰 메모가 저장되었습니다.");
   });
 
-  btnDelete?.addEventListener('click', () => {
+  document.getElementById('btnDeleteMemo')?.addEventListener('click', () => {
     const student = getSelectedStudent();
     if (!student) return;
-    updateStudentRecord(student.id, appState.activeDomainKey, { memo: '' });
+    updateStudentRecord(student.id, appState.activeDomainId, { memo: '' });
     closeAllModals();
     renderStudentList();
     updateActiveStudentPanel();
@@ -1167,102 +1297,29 @@ function initMemoModal() {
   });
 }
 
-// --------------------------------------------------------------------------
-// 11. 명단 관리 (전입, 전출, 번호 일괄 재부여)
-// --------------------------------------------------------------------------
-function openStudentManager() {
-  renderManageStudentTable();
-  openModal('studentManagerModal');
-}
-
-function renderManageStudentTable() {
-  const tbody = document.getElementById('manageStudentListBody');
-  const totalCountEl = document.getElementById('manageTotalCount');
-  if (!tbody) return;
-  tbody.innerHTML = '';
-
-  const sem = appState.currentSemester;
-  const list = (appState.database[sem]?.students || [])
-    .filter(s => s.classNum === appState.activeClass)
-    .sort((a, b) => a.num - b.num);
-
-  if (totalCountEl) totalCountEl.textContent = list.length;
-
-  list.forEach((st, idx) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td style="text-align:center;font-weight:bold;">${idx + 1}</td>
-      <td style="text-align:center;">${st.classNum}</td>
-      <td style="text-align:center;">
-        <input type="number" class="table-num-input" value="${st.num}" data-id="${st.id}" style="width:46px;text-align:center;border:1px solid var(--border-color);border-radius:4px;">
-      </td>
-      <td>
-        <input type="text" class="table-name-input" value="${st.name}" data-id="${st.id}" style="width:100%;border:1px solid var(--border-color);border-radius:4px;padding:2px 6px;">
-      </td>
-      <td style="text-align:center;">
-        <button class="btn-step-order" onclick="moveStudentRowOrder('${st.id}', -1)" title="위로">▲</button>
-        <button class="btn-step-order" onclick="moveStudentRowOrder('${st.id}', 1)" title="아래로">▼</button>
-      </td>
-      <td style="text-align:center;">
-        <button class="btn-delete-student" onclick="deleteStudentRecord('${st.id}')" style="color:var(--danger);font-weight:bold;">삭제</button>
-      </td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
-
-window.moveStudentRowOrder = function(studentId, direction) {
-  const sem = appState.currentSemester;
-  const students = appState.database[sem].students;
-  const currentClassStudents = students.filter(s => s.classNum === appState.activeClass);
-  const idx = currentClassStudents.findIndex(s => s.id === studentId);
-  const targetIdx = idx + direction;
-
-  if (targetIdx < 0 || targetIdx >= currentClassStudents.length) return;
-
-  const temp = currentClassStudents[idx];
-  currentClassStudents[idx] = currentClassStudents[targetIdx];
-  currentClassStudents[targetIdx] = temp;
-
-  // 순서대로 번호 자동 동기화
-  currentClassStudents.forEach((s, i) => s.num = i + 1);
-
-  renderManageStudentTable();
-};
-
-window.deleteStudentRecord = function(studentId) {
-  if (!confirm("해당 학생을 명단에서 전출(삭제) 처리하시겠습니까?")) return;
-  const sem = appState.currentSemester;
-  appState.database[sem].students = appState.database[sem].students.filter(s => s.id !== studentId);
-  markDirty(true);
-  saveLocalState();
-  renderManageStudentTable();
-  renderStudentList();
-};
-
 function initStudentManager() {
-  document.getElementById('btnOpenStudentManager')?.addEventListener('click', openStudentManager);
+  document.getElementById('btnOpenStudentManager')?.addEventListener('click', () => {
+    renderManageStudentTable();
+    openModal('studentManagerModal');
+  });
 
-  // 전입 학생 추가
   document.getElementById('btnAddStudentSubmit')?.addEventListener('click', () => {
-    const classVal = document.getElementById('addStudentClass')?.value.trim() || appState.activeClass;
     const numVal = parseInt(document.getElementById('addStudentNumber')?.value);
     const nameVal = document.getElementById('addStudentName')?.value.trim();
 
     if (!numVal || !nameVal) {
-      alert("번호와 성명을 올바르게 입력해주세요.");
+      alert("번호와 학생 성명을 올바르게 입력해주세요.");
       return;
     }
 
     const sem = appState.currentSemester;
-    const newId = `${classVal}-${String(numVal).padStart(2, '0')}_${Date.now()}`;
+    const newId = `${appState.activeClass}-${String(numVal).padStart(2, '0')}_${Date.now()}`;
     appState.database[sem].students.push({
       id: newId,
-      classNum: classVal,
+      classNum: appState.activeClass,
       num: numVal,
       name: nameVal,
-      photoUrl: '',
-      memo: ''
+      photoUrl: ''
     });
 
     markDirty(true);
@@ -1275,7 +1332,6 @@ function initStudentManager() {
     document.getElementById('addStudentNumber').value = numVal + 1;
   });
 
-  // 번호 일괄 재부여
   document.getElementById('btnRenumberAll')?.addEventListener('click', () => {
     if (!confirm("현재 정렬 순서대로 1번부터 번호를 순차적으로 재부여하시겠습니까?")) return;
     const sem = appState.currentSemester;
@@ -1285,10 +1341,9 @@ function initStudentManager() {
     saveLocalState();
     renderManageStudentTable();
     renderStudentList();
-    showToast("번호 일괄 재부여가 완료되었습니다.");
+    showToast("1번부터 번호 일괄 정리가 완료되었습니다.");
   });
 
-  // 변경사항 시트 반영 (저장)
   document.getElementById('btnApplyStudentChanges')?.addEventListener('click', () => {
     const sem = appState.currentSemester;
     const numInputs = document.querySelectorAll('.table-num-input');
@@ -1311,12 +1366,76 @@ function initStudentManager() {
     closeAllModals();
     renderStudentList();
     updateActiveStudentPanel();
-    showToast("학생 명단 변경사항이 성공적으로 반영되었습니다.");
+    showToast("순서 및 수정사항이 반영되었습니다.");
   });
 }
 
+function renderManageStudentTable() {
+  const tbody = document.getElementById('manageStudentListBody');
+  const totalCountEl = document.getElementById('manageTotalCount');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  const sem = appState.currentSemester;
+  const list = (appState.database[sem]?.students || [])
+    .filter(s => s.classNum === appState.activeClass)
+    .sort((a, b) => a.num - b.num);
+
+  if (totalCountEl) totalCountEl.textContent = list.length;
+
+  list.forEach((st, idx) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="text-align:center;font-weight:bold;">${idx + 1}</td>
+      <td style="text-align:center;">${st.classNum}</td>
+      <td style="text-align:center;">
+        <input type="number" class="table-num-input" value="${st.num}" data-id="${st.id}" style="width:48px;text-align:center;border:1px solid var(--border-color);border-radius:4px;padding:2px;">
+      </td>
+      <td>
+        <input type="text" class="table-name-input" value="${st.name}" data-id="${st.id}" style="width:100%;border:1px solid var(--border-color);border-radius:4px;padding:2px 6px;">
+      </td>
+      <td style="text-align:center;">
+        <button class="btn-step-order" onclick="moveStudentRowOrder('${st.id}', -1)" title="위로">▲</button>
+        <button class="btn-step-order" onclick="moveStudentRowOrder('${st.id}', 1)" title="아래로">▼</button>
+      </td>
+      <td style="text-align:center;">
+        <button class="btn-delete-student" onclick="deleteStudentRecord('${st.id}')" style="color:var(--danger);font-weight:bold;">전출</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+window.moveStudentRowOrder = function(studentId, direction) {
+  const sem = appState.currentSemester;
+  const students = appState.database[sem].students;
+  const currentClassStudents = students.filter(s => s.classNum === appState.activeClass);
+  const idx = currentClassStudents.findIndex(s => s.id === studentId);
+  const targetIdx = idx + direction;
+
+  if (targetIdx < 0 || targetIdx >= currentClassStudents.length) return;
+
+  const temp = currentClassStudents[idx];
+  currentClassStudents[idx] = currentClassStudents[targetIdx];
+  currentClassStudents[targetIdx] = temp;
+
+  currentClassStudents.forEach((s, i) => s.num = i + 1);
+  renderManageStudentTable();
+};
+
+window.deleteStudentRecord = function(studentId) {
+  if (!confirm("해당 학생을 전출 처리(명단 삭제)하시겠습니까?")) return;
+  const sem = appState.currentSemester;
+  appState.database[sem].students = appState.database[sem].students.filter(s => s.id !== studentId);
+  markDirty(true);
+  saveLocalState();
+  renderManageStudentTable();
+  renderStudentList();
+  showToast("전출 처리가 완료되었습니다.");
+};
+
 // --------------------------------------------------------------------------
-// 12. 통계 & 현황 대시보드
+// 11. 결과 현황 대시보드 & 통계
 // --------------------------------------------------------------------------
 function openDashboard() {
   const sem = appState.currentSemester;
@@ -1329,7 +1448,7 @@ function openDashboard() {
   let pendingCount = 0;
 
   students.forEach(s => {
-    const r = getStudentRecord(s.id, curDomain.key);
+    const r = getStudentRecord(s.id, curDomain.id);
     if (r.t1 === -1) absentCount++;
     else if (r.finalScore !== null) doneCount++;
     else pendingCount++;
@@ -1343,7 +1462,6 @@ function openDashboard() {
   document.getElementById('statPendingStudents').textContent = `${pendingCount}명`;
   document.getElementById('statAbsentStudents').textContent = `${absentCount}명`;
 
-  // 학급별 프로그레스 카드 렌더링
   const cardsContainer = document.getElementById('classProgressCardsContainer');
   if (cardsContainer) {
     cardsContainer.innerHTML = '';
@@ -1354,7 +1472,7 @@ function openDashboard() {
       let cAbsent = [];
 
       cStudents.forEach(st => {
-        const r = getStudentRecord(st.id, curDomain.key);
+        const r = getStudentRecord(st.id, curDomain.id);
         if (r.t1 === -1) cAbsent.push(st.name);
         else if (r.finalScore !== null) cDone++;
         else cUndone.push(st.name);
@@ -1366,17 +1484,17 @@ function openDashboard() {
       card.className = 'class-progress-card';
       card.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;">
-          <strong style="font-size:0.9rem;">${cName}</strong>
-          <span style="font-size:0.8rem;font-weight:bold;color:var(--primary);">${cDone} / ${cStudents.length}명 (${cRate}%)</span>
+          <strong style="font-size:0.88rem;">${cName}</strong>
+          <span style="font-size:0.78rem;font-weight:900;color:var(--primary);">${cDone} / ${cStudents.length}명 (${cRate}%)</span>
         </div>
         <div class="progress-bar-bg" style="margin-top:4px;">
           <div class="progress-bar-fill" style="width:${cRate}%;"></div>
         </div>
-        <div style="font-size:0.72rem;color:var(--text-muted);margin-top:4px;">
+        <div style="font-size:0.7rem;color:var(--text-muted);margin-top:4px;">
           미측정: <span style="color:var(--warning);font-weight:bold;">${cUndone.length > 0 ? cUndone.join(', ') : '없음'}</span>
         </div>
-        <div style="font-size:0.72rem;color:var(--text-muted);">
-          결석: <span style="color:var(--danger);font-weight:bold;">${cAbsent.length > 0 ? cAbsent.join(', ') : '없음'}</span>
+        <div style="font-size:0.7rem;color:var(--text-muted);">
+          미참여(결석): <span style="color:var(--danger);font-weight:bold;">${cAbsent.length > 0 ? cAbsent.join(', ') : '없음'}</span>
         </div>
         <button class="btn-tool-sub" style="margin-top:6px;width:100%;justify-content:center;" onclick="jumpToClassFromDashboard('${cName}')">이 학급으로 즉시 이동</button>
       `;
@@ -1396,15 +1514,12 @@ window.jumpToClassFromDashboard = function(cName) {
 };
 
 // --------------------------------------------------------------------------
-// 13. 데이터 센터 & 엑셀 내보내기/가져오기 & 학기 관리
+// 12. 엑셀 다운로드 (세부기록+NEIS 일체형) & 학기 누적 관리
 // --------------------------------------------------------------------------
 function initDataCenter() {
-  document.getElementById('btnOpenDataCenter')?.addEventListener('click', () => {
-    updateSemesterDropdown();
-    openModal('dataCenterModal');
-  });
+  document.getElementById('btnQuickDownload')?.addEventListener('click', () => exportDetailedAndNeisExcel());
+  document.getElementById('btnExportDetailExcel')?.addEventListener('click', () => exportDetailedAndNeisExcel());
 
-  // 학기 전환
   document.getElementById('btnSwitchSemester')?.addEventListener('click', () => {
     const sel = document.getElementById('selectSemesterList')?.value;
     if (sel && sel !== appState.currentSemester) {
@@ -1419,31 +1534,30 @@ function initDataCenter() {
     }
   });
 
-  // 새 학기 생성
   document.getElementById('btnOpenNewSemesterDialog')?.addEventListener('click', () => {
     const newName = prompt("신규 생성할 학기 명칭을 입력하세요 (예: 2027학년도 1학기):");
     if (!newName || !newName.trim()) return;
-    if (appState.semesters.includes(newName.trim())) {
+    const trimmed = newName.trim();
+    if (appState.semesters.includes(trimmed)) {
       alert("이미 존재하는 학기명입니다.");
       return;
     }
 
-    const copyPrev = confirm("기존 학기의 학생 명렬표를 그대로 복사해서 가져오시겠습니까?\n(점수와 기록은 초기화된 상태로 시작됩니다)");
+    const copyPrev = confirm("기존 학기의 학생 명렬표를 그대로 복사해서 시작하시겠습니까?\n(점수는 초기화된 상태로 생성됩니다)");
     const prevSem = appState.currentSemester;
-    const newSem = newName.trim();
 
-    appState.semesters.push(newSem);
-    appState.currentSemester = newSem;
+    appState.semesters.push(trimmed);
+    appState.currentSemester = trimmed;
 
     let studentsCopy = [];
     if (copyPrev && appState.database[prevSem]?.students) {
       studentsCopy = appState.database[prevSem].students.map(s => ({
         ...s,
-        memo: ''
+        photoUrl: s.photoUrl || ''
       }));
     }
 
-    appState.database[newSem] = {
+    appState.database[trimmed] = {
       students: studentsCopy,
       records: {}
     };
@@ -1454,10 +1568,9 @@ function initDataCenter() {
     renderStudentList();
     updateActiveStudentPanel();
     closeAllModals();
-    showToast(`신규 [${newSem}] 학기가 개설되었습니다! 🎉`);
+    showToast(`신규 [${trimmed}] 학기가 개설되었습니다! 🎉`);
   });
 
-  // 학기명 수정
   document.getElementById('btnRenameCurrentSemester')?.addEventListener('click', () => {
     const current = appState.currentSemester;
     const newName = prompt("현재 학기의 변경할 명칭을 입력하세요:", current);
@@ -1477,14 +1590,13 @@ function initDataCenter() {
     showToast("학기 명칭이 변경되었습니다.");
   });
 
-  // 학기 삭제
   document.getElementById('btnDeleteCurrentSemester')?.addEventListener('click', () => {
     if (appState.semesters.length <= 1) {
       alert("최소 1개 이상의 학기가 유지되어야 합니다.");
       return;
     }
     const current = appState.currentSemester;
-    if (!confirm(`정말로 [${current}] 학기의 모든 명렬표와 측정 데이터를 영구 삭제하시겠습니까?`)) return;
+    if (!confirm(`정말로 [${current}] 학기의 데이터를 영구 삭제하시겠습니까?`)) return;
 
     delete appState.database[current];
     appState.semesters = appState.semesters.filter(s => s !== current);
@@ -1499,26 +1611,20 @@ function initDataCenter() {
     showToast("학기 데이터가 완전히 삭제되었습니다.");
   });
 
-  // 세부기록 엑셀 다운로드
-  document.getElementById('btnExportDetailExcel')?.addEventListener('click', () => exportDetailedExcel());
-
-  // NEIS 일괄등록 엑셀 다운로드
-  document.getElementById('btnExportNeisExcel')?.addEventListener('click', () => exportNeisExcel());
-
-  // 세부기록 수정본 역반영 업로드
+  // 수정본 역반영 업로드
   document.getElementById('reverseExcelFileInput')?.addEventListener('change', (e) => {
     if (e.target.files.length > 0) handleReverseExcelUpload(e.target.files[0]);
   });
 
-  // 반 기록 초기화
+  // 반 초기화
   document.getElementById('btnResetCurrentDomain')?.addEventListener('click', () => {
     const cDomain = getCurrentDomain();
-    if (!confirm(`[${appState.activeClass}]의 [${cDomain.name}] 기록만 모두 비우시겠습니까?`)) return;
+    if (!confirm(`[${appState.activeClass}]의 [${cDomain.shortName || cDomain.name}] 기록만 모두 비우시겠습니까?`)) return;
     pushHistorySnapshot();
     const sem = appState.currentSemester;
     const students = appState.database[sem]?.students || [];
     students.filter(s => s.classNum === appState.activeClass).forEach(st => {
-      const key = `${st.id}_${cDomain.key}`;
+      const key = `${st.id}_${cDomain.id}`;
       if (appState.database[sem].records[key]) {
         delete appState.database[sem].records[key];
       }
@@ -1549,7 +1655,7 @@ function initDataCenter() {
     renderStudentList();
     updateActiveStudentPanel();
     closeAllModals();
-    showToast("현재 반의 모든 평가영역 기록이 초기화되었습니다.");
+    showToast("현재 반 전체 평가영역 기록이 초기화되었습니다.");
   });
 }
 
@@ -1571,24 +1677,28 @@ function updateSemesterDropdown() {
   });
 }
 
-// 세부기록 엑셀 내보내기 (SheetJS)
-function exportDetailedExcel() {
+// 현재 반 세부기록 + NEIS 일체형 엑셀 다운로드 (SheetJS)
+function exportDetailedAndNeisExcel() {
   const sem = appState.currentSemester;
-  const students = appState.database[sem]?.students || [];
-  const domain = getCurrentDomain();
+  const currentClassStudents = (appState.database[sem]?.students || [])
+    .filter(s => s.classNum === appState.activeClass)
+    .sort((a, b) => a.num - b.num);
 
-  const dataRows = [
-    ['학기', '학급', '번호', '성명', '평가영역', '1차 시기', '2차 시기', '최종 환산점수', '관찰 메모']
+  const curDomain = getCurrentDomain();
+  const domains = appState.settings.domains;
+
+  // 1. 세부기록 시트 데이터
+  const detailRows = [
+    ['학기', '학급', '번호', '성명', '평가영역', '1차 시기', '2차 시기', '최종 환산점수', '비고(관찰메모)']
   ];
-
-  students.forEach(st => {
-    const r = getStudentRecord(st.id, domain.key);
-    dataRows.push([
+  currentClassStudents.forEach(st => {
+    const r = getStudentRecord(st.id, curDomain.id);
+    detailRows.push([
       sem,
       st.classNum,
       st.num,
       st.name,
-      domain.name,
+      curDomain.name,
       r.t1 !== null ? (r.t1 === -1 ? '결석' : r.t1) : '',
       r.t2 !== null ? (r.t2 === -1 ? '결석' : (r.t2 === 'pass' ? '패스' : r.t2)) : '',
       r.finalScore !== null ? r.finalScore : '',
@@ -1596,41 +1706,33 @@ function exportDetailedExcel() {
     ]);
   });
 
-  const ws = XLSX.utils.aoa_to_sheet(dataRows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "세부측정기록");
-  XLSX.writeFile(wb, `[수행평가세부기록]_${sem}_${domain.name}_${Date.now()}.xlsx`);
-  showToast("세부기록 엑셀이 다운로드되었습니다. 📊");
-}
+  // 2. NEIS 일괄등록 규격 시트 데이터
+  const neisHeader = ['반', '번호', '성명'];
+  domains.forEach(d => neisHeader.push(`${d.excelHeader || d.shortName || d.name}(${d.maxScore})`));
+  const neisRows = [neisHeader];
 
-// 나이스(NEIS) 규격 일괄등록 엑셀 내보내기
-function exportNeisExcel() {
-  const sem = appState.currentSemester;
-  const students = appState.database[sem]?.students || [];
-  const domain = getCurrentDomain();
-
-  const dataRows = [
-    ['반', '번호', '성명', '점수']
-  ];
-
-  students.forEach(st => {
-    const r = getStudentRecord(st.id, domain.key);
-    dataRows.push([
-      st.classNum.replace(/[^0-9]/g, ''),
-      st.num,
-      st.name,
-      r.finalScore !== null ? r.finalScore : ''
-    ]);
+  currentClassStudents.forEach(st => {
+    const row = [st.classNum.replace(/[^0-9]/g, ''), st.num, st.name];
+    domains.forEach(d => {
+      const r = getStudentRecord(st.id, d.id);
+      row.push(r.finalScore !== null ? r.finalScore : '');
+    });
+    neisRows.push(row);
   });
 
-  const ws = XLSX.utils.aoa_to_sheet(dataRows);
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "NEIS업로드양식");
-  XLSX.writeFile(wb, `[NEIS일괄등록]_${sem}_${domain.name}.xlsx`);
-  showToast("NEIS 일괄등록 엑셀 서식이 다운로드되었습니다. 📑");
+  const wsDetail = XLSX.utils.aoa_to_sheet(detailRows);
+  const wsNeis = XLSX.utils.aoa_to_sheet(neisRows);
+
+  XLSX.utils.book_append_sheet(wb, wsDetail, "세부측정기록");
+  XLSX.utils.book_append_sheet(wb, wsNeis, "NEIS일괄등록");
+
+  const fileName = `[수행평가]_${appState.activeClass}_${curDomain.shortName || curDomain.name}_${Date.now()}.xlsx`;
+  XLSX.writeFile(wb, fileName);
+  showToast(`${appState.activeClass} 엑셀 보고서 다운로드 완료! 📊`);
 }
 
-// 수정된 엑셀 역반영 업로드
+// 엑셀 수정본 역반영 업로드
 async function handleReverseExcelUpload(file) {
   if (!file) return;
   try {
@@ -1649,13 +1751,11 @@ async function handleReverseExcelUpload(file) {
     const domain = getCurrentDomain();
     let updatedCount = 0;
 
-    // 헤더 제외 행 분석
     for (let i = 1; i < rows.length; i++) {
       const r = rows[i];
       if (!r || r.length < 4) continue;
       const cNum = String(r[1]).includes('반') ? String(r[1]) : `${r[1]}반`;
       const num = parseInt(r[2]);
-      const name = String(r[3]).trim();
       const t1Raw = r[5];
       const t2Raw = r[6];
       const memo = r[8] || '';
@@ -1665,7 +1765,7 @@ async function handleReverseExcelUpload(file) {
         let t1 = (t1Raw === '결석' || t1Raw === -1) ? -1 : (t1Raw !== undefined && t1Raw !== '' ? Number(t1Raw) : null);
         let t2 = (t2Raw === '결석' || t2Raw === -1) ? -1 : ((t2Raw === '패스' || t2Raw === '-') ? 'pass' : (t2Raw !== undefined && t2Raw !== '' ? Number(t2Raw) : null));
 
-        updateStudentRecord(st.id, domain.key, { t1, t2, memo });
+        updateStudentRecord(st.id, domain.id, { t1, t2, memo });
         updatedCount++;
       }
     }
@@ -1677,12 +1777,12 @@ async function handleReverseExcelUpload(file) {
     closeAllModals();
     showToast(`수정본 엑셀에서 ${updatedCount}명의 기록이 역반영되었습니다!`);
   } catch (err) {
-    alert("엑셀 파싱 중 오류가 발생했습니다: " + err.message);
+    alert("엑셀 역반영 중 오류: " + err.message);
   }
 }
 
 // --------------------------------------------------------------------------
-// 14. 커스텀 설정, 테마/폰트 & 전체 JSON 백업/복원
+// 13. 환경설정, 테마/배경/폰트 커스텀 & 배점표 & 백업
 // --------------------------------------------------------------------------
 function initSettingsModal() {
   document.getElementById('btnOpenSettings')?.addEventListener('click', () => {
@@ -1690,7 +1790,6 @@ function initSettingsModal() {
     openModal('settingsModal');
   });
 
-  // GAS API URL 입력 및 연결 테스트
   document.getElementById('btnTestApiConnection')?.addEventListener('click', async () => {
     const url = document.getElementById('gasApiUrlInput')?.value.trim();
     if (!url) {
@@ -1703,31 +1802,31 @@ function initSettingsModal() {
       const res = await fetch(`${url}?action=PING&_t=${Date.now()}`);
       const json = await res.json();
       if (json && json.status === 'PONG') {
-        alert("구글 앱스 스크립트 API와 성공적으로 연결되었습니다! 🚀");
+        alert("구글 앱스 스크립트(GAS) Web App API와 정상 연결되었습니다! 🚀");
       } else {
-        alert("연결 응답을 확인했으나 형식 오류가 발생했습니다.");
+        alert("연결 응답 형식이 올바르지 않습니다.");
       }
     } catch (e) {
-      alert("API 연결 실패: 올바른 Web App URL인지 배포 권한(모든 사용자)을 확인하세요.");
+      alert("API 연결 실패: 배포 권한이 '모든 사람(Anyone)'으로 설정되었는지 확인하세요.");
     } finally {
       btn.textContent = "연결 테스트";
     }
   });
 
-  // 테마/배경/폰트 팔레트 동적 렌더링
   renderThemeColorsPicker();
   renderBgStylePicker();
 
-  // 평가 영역 추가
   document.getElementById('btnAddNewDomain')?.addEventListener('click', () => {
     const name = prompt("추가할 신규 평가 영역명을 입력하세요:");
     if (!name || !name.trim()) return;
-    const key = `domain_${Date.now()}`;
+    const id = `domain_${Date.now()}`;
     appState.settings.domains.push({
-      key,
+      id,
       name: name.trim(),
+      shortName: name.trim().slice(0, 6),
+      excelHeader: name.trim(),
       maxScore: 20,
-      absentScore: 0,
+      absentScore: 7,
       criteria: [
         { count: 10, score: 20 },
         { count: 8, score: 18 },
@@ -1740,22 +1839,27 @@ function initSettingsModal() {
     renderDomainEditorList();
   });
 
-  // 설정 저장 및 적용
   document.getElementById('btnSaveAllSettings')?.addEventListener('click', () => {
+    appState.settings.appTitle = document.getElementById('appMainTitleInput')?.value.trim() || '수행평가 입력기 Pro';
     appState.settings.gasApiUrl = document.getElementById('gasApiUrlInput')?.value.trim() || '';
     appState.settings.font = document.getElementById('fontFamilySelector')?.value || 'pretendard';
 
     saveLocalState();
     applyVisualSettings();
+    updateMainTitleDisplay();
     renderDomainTabs();
     closeAllModals();
     showToast("환경설정이 성공적으로 저장 및 적용되었습니다.");
+
+    if (appState.settings.gasApiUrl) {
+      callGasApi('SAVE_CONFIG', { config: appState.settings }).catch(() => {});
+    }
   });
 
-  // 전체 데이터 통합 JSON 내보내기
+  // 전체 통합 JSON 내보내기
   document.getElementById('btnExportFullJson')?.addEventListener('click', () => {
     const fullBackup = {
-      version: 'pe_pro_v2',
+      version: 'v4.0_integrated',
       exportDate: new Date().toISOString(),
       currentSemester: appState.currentSemester,
       semesters: appState.semesters,
@@ -1767,19 +1871,19 @@ function initSettingsModal() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `[수행평가통합백업]_${appState.currentSemester}_${new Date().toISOString().slice(0,10)}.json`;
+    a.download = `[수행평가_전체백업]_${appState.currentSemester}_${new Date().toISOString().slice(0,10)}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    showToast("전체 데이터 통합 JSON 파일이 다운로드되었습니다. 🛡️");
+    showToast("전체 데이터 통합 JSON 파일이 저장되었습니다. 🛡️");
   });
 
-  // 전체 데이터 통합 JSON 원클릭 복원
+  // 전체 통합 JSON 원클릭 복원
   document.getElementById('importJsonFileInput')?.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    if (!confirm("백업 파일을 불러오면 현재 입력된 모든 학기 데이터가 대체됩니다. 계속 진행하시겠습니까?")) {
+    if (!confirm("백업 파일을 불러오면 현재 데이터가 대체됩니다. 계속하시겠습니까?")) {
       e.target.value = '';
       return;
     }
@@ -1788,14 +1892,12 @@ function initSettingsModal() {
       const text = await file.text();
       const parsed = JSON.parse(text);
 
-      // 신형 v2 포맷 또는 기존 v1 포맷 호환 복원
       if (parsed.database) {
         appState.database = parsed.database;
         appState.semesters = parsed.semesters || appState.semesters;
         appState.currentSemester = parsed.currentSemester || appState.semesters[0];
-        if (parsed.settings) appState.settings = { ...appState.settings, ...parsed.settings };
+        if (parsed.settings) appState.settings = Object.assign({}, defaultSettings, parsed.settings);
       } else if (parsed.sheets || parsed.records) {
-        // 기존 단일 시트 백업 포맷 호환 처리
         const sem = appState.currentSemester;
         appState.database[sem] = {
           students: parsed.students || [],
@@ -1805,6 +1907,7 @@ function initSettingsModal() {
 
       saveLocalState();
       applyVisualSettings();
+      updateMainTitleDisplay();
       updateSemesterHeaderDisplay();
       renderClassTabs();
       renderDomainTabs();
@@ -1812,7 +1915,7 @@ function initSettingsModal() {
       closeAllModals();
       showToast("전체 데이터가 1초 만에 완벽히 복원되었습니다! 🚀");
     } catch (err) {
-      alert("백업 JSON 파일 복원 중 오류가 발생했습니다: " + err.message);
+      alert("백업 JSON 파일 복원 오류: " + err.message);
     }
   });
 }
@@ -1820,6 +1923,8 @@ function initSettingsModal() {
 function syncSettingsUI() {
   const urlInput = document.getElementById('gasApiUrlInput');
   const fontSel = document.getElementById('fontFamilySelector');
+  const titleInput = document.getElementById('appMainTitleInput');
+  if (titleInput) titleInput.value = appState.settings.appTitle || '수행평가 입력기 Pro';
   if (urlInput) urlInput.value = appState.settings.gasApiUrl || '';
   if (fontSel) fontSel.value = appState.settings.font || 'pretendard';
   renderDomainEditorList();
@@ -1852,16 +1957,16 @@ function renderBgStylePicker() {
   const container = document.getElementById('bgStyleGrid');
   if (!container) return;
   const bgs = [
-    { key: 'slate', label: '라이트 슬레이트', color: '#f1f5f9' },
-    { key: 'cream', label: '크림 베이지', color: '#f8f6f0' },
-    { key: 'mint', label: '산뜻 민트', color: '#eef8f5' },
-    { key: 'sky', label: '아이스 블루', color: '#edf6fc' },
-    { key: 'lavender', label: '소프트 라벤더', color: '#f5f2fa' },
-    { key: 'dark', label: '다크 모드', color: '#151d2e' }
+    { key: 'slate', label: '슬레이트', color: '#f1f5f9' },
+    { key: 'cream', label: '크림베이지', color: '#faf7f2' },
+    { key: 'mint', label: '산뜻민트', color: '#f0fdf4' },
+    { key: 'sky', label: '아이스블루', color: '#f0f9ff' },
+    { key: 'lavender', label: '라벤더', color: '#faf5ff' },
+    { key: 'dark', label: '다크모드', color: '#151d2e' }
   ];
 
   container.innerHTML = bgs.map(b => `
-    <button class="btn-tool-sub ${appState.settings.bg === b.key ? 'active' : ''}" onclick="setAppBg('${b.key}')" style="display:flex;align-items:center;gap:6px;">
+    <button class="btn-tool-sub ${appState.settings.bg === b.key ? 'active' : ''}" onclick="setAppBg('${b.key}')">
       <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background-color:${b.color};border:1px solid #ccc;"></span>
       ${b.label}
     </button>
@@ -1894,51 +1999,66 @@ function renderDomainEditorList() {
 
   appState.settings.domains.forEach((d, idx) => {
     const card = document.createElement('div');
-    card.className = 'domain-setting-card';
-    card.style.cssText = 'background:var(--bg-surface-sub);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:12px;margin-top:8px;';
+    card.style.cssText = 'background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:10px;margin-top:6px;';
+
+    let criteriaChipsHtml = d.criteria.map((c, cIdx) => `
+      <div style="display:flex;align-items:center;gap:3px;background:var(--bg-surface-sub);padding:2px 6px;border-radius:4px;border:1px solid var(--border-color);">
+        <input type="number" value="${c.count}" onchange="updateCriteriaCount(${idx}, ${cIdx}, this.value)" style="width:36px;text-align:center;font-size:0.75rem;">회 = 
+        <input type="number" value="${c.score}" onchange="updateCriteriaScore(${idx}, ${cIdx}, this.value)" style="width:36px;text-align:center;font-size:0.75rem;font-weight:bold;">점
+        <button onclick="deleteCriteriaTier(${idx}, ${cIdx})" style="color:var(--danger);font-size:0.75rem;margin-left:2px;">✕</button>
+      </div>
+    `).join('');
 
     card.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <input type="text" value="${d.name}" class="domain-name-input" data-idx="${idx}" style="font-weight:bold;font-size:0.9rem;border:1px solid var(--border-color);border-radius:4px;padding:3px 8px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <input type="text" value="${d.name}" onchange="updateDomainName(${idx}, this.value)" style="font-weight:900;font-size:0.85rem;border:1px solid var(--border-color);border-radius:4px;padding:2px 6px;width:55%;">
         <div>
-          <span style="font-size:0.75rem;color:var(--text-muted);">만점: </span>
-          <input type="number" value="${d.maxScore}" class="domain-max-input" data-idx="${idx}" style="width:50px;border:1px solid var(--border-color);border-radius:4px;padding:2px 4px;text-align:center;">
-          <button class="btn-danger-outline" style="padding:2px 8px;font-size:0.7rem;margin-left:6px;" onclick="deleteDomainConfig(${idx})">삭제</button>
+          <span style="font-size:0.72rem;color:var(--text-muted);">만점:</span>
+          <input type="number" value="${d.maxScore}" onchange="updateDomainMax(${idx}, this.value)" style="width:42px;border:1px solid var(--border-color);border-radius:4px;text-align:center;font-size:0.75rem;">
+          <span style="font-size:0.72rem;color:var(--text-muted);margin-left:4px;">결석:</span>
+          <input type="number" value="${d.absentScore}" onchange="updateDomainAbsent(${idx}, this.value)" style="width:42px;border:1px solid var(--border-color);border-radius:4px;text-align:center;font-size:0.75rem;">
+          <button class="btn-danger-outline" style="padding:2px 6px;font-size:0.7rem;margin-left:6px;" onclick="deleteDomainConfig(${idx})">삭제</button>
         </div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <span style="font-size:0.7rem;font-weight:bold;color:var(--text-muted);">구간별 극간 배점표:</span>
+        <button class="btn-tool-sub" style="padding:1px 6px;font-size:0.68rem;" onclick="addCriteriaTier(${idx})">+ 구간 추가</button>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;">
+        ${criteriaChipsHtml}
       </div>
     `;
     container.appendChild(card);
   });
-
-  // 인풋 실시간 반영
-  container.querySelectorAll('.domain-name-input').forEach(input => {
-    input.addEventListener('change', (e) => {
-      const idx = e.target.getAttribute('data-idx');
-      appState.settings.domains[idx].name = e.target.value.trim() || appState.settings.domains[idx].name;
-    });
-  });
-  container.querySelectorAll('.domain-max-input').forEach(input => {
-    input.addEventListener('change', (e) => {
-      const idx = e.target.getAttribute('data-idx');
-      appState.settings.domains[idx].maxScore = parseInt(e.target.value) || 20;
-    });
-  });
 }
 
-window.deleteDomainConfig = function(idx) {
+window.updateDomainName = (dIdx, val) => { appState.settings.domains[dIdx].name = val.trim(); };
+window.updateDomainMax = (dIdx, val) => { appState.settings.domains[dIdx].maxScore = parseInt(val) || 20; };
+window.updateDomainAbsent = (dIdx, val) => { appState.settings.domains[dIdx].absentScore = parseInt(val) || 0; };
+window.updateCriteriaCount = (dIdx, cIdx, val) => { appState.settings.domains[dIdx].criteria[cIdx].count = parseInt(val) || 0; };
+window.updateCriteriaScore = (dIdx, cIdx, val) => { appState.settings.domains[dIdx].criteria[cIdx].score = parseInt(val) || 0; };
+window.addCriteriaTier = (dIdx) => {
+  appState.settings.domains[dIdx].criteria.push({ count: 0, score: 0 });
+  renderDomainEditorList();
+};
+window.deleteCriteriaTier = (dIdx, cIdx) => {
+  appState.settings.domains[dIdx].criteria.splice(cIdx, 1);
+  renderDomainEditorList();
+};
+window.deleteDomainConfig = (idx) => {
   if (appState.settings.domains.length <= 1) {
     alert("최소 1개 이상의 평가 영역이 필요합니다.");
     return;
   }
   if (!confirm("이 평가 영역을 삭제하시겠습니까?")) return;
   appState.settings.domains.splice(idx, 1);
-  appState.activeDomainKey = appState.settings.domains[0].key;
+  appState.activeDomainId = appState.settings.domains[0].id;
   renderDomainEditorList();
   renderDomainTabs();
 };
 
 // --------------------------------------------------------------------------
-// 15. 구글 시트 백엔드 일괄 동기화 (GAS Web App API 연동)
+// 14. 실시간 수동 저장 기능 (구글 시트 백엔드 일괄 동기화)
 // --------------------------------------------------------------------------
 async function callGasApi(action, payload = {}) {
   const url = appState.settings.gasApiUrl;
@@ -1955,7 +2075,7 @@ async function callGasApi(action, payload = {}) {
 async function saveAllToGoogleSheets() {
   const url = appState.settings.gasApiUrl;
   if (!url) {
-    alert("먼저 [설정] 창에서 구글 앱스 스크립트(GAS) Web App API 엔드포인트 URL을 입력해주세요!");
+    alert("먼저 [설정] 창에서 구글 앱스 스크립트(GAS) Web App API URL을 등록해주세요!");
     openModal('settingsModal');
     return;
   }
@@ -1965,42 +2085,74 @@ async function saveAllToGoogleSheets() {
   const text = document.getElementById('saveBtnText');
 
   if (btn) btn.disabled = true;
-  if (text) text.textContent = "동기화 중...";
-  if (icon) icon.classList.add('animate-spin');
+  if (text) text.textContent = "저장중...";
 
   try {
     const sem = appState.currentSemester;
-    const currentStudents = appState.database[sem]?.students || [];
-    const currentRecords = appState.database[sem]?.records || {};
+    const currentStudents = (appState.database[sem]?.students || []).filter(s => s.classNum === appState.activeClass);
+    const updates = [];
+
+    currentStudents.forEach(st => {
+      appState.settings.domains.forEach((d, dSeq) => {
+        const r = getStudentRecord(st.id, d.id);
+        updates.push({
+          number: st.num,
+          domainSeq: dSeq,
+          excelHeader: d.excelHeader || d.shortName || d.name,
+          t1: r.t1,
+          t2: r.t2,
+          finalScore: r.finalScore,
+          memo: r.memo || ''
+        });
+      });
+    });
 
     const payload = {
       semester: sem,
-      students: currentStudents,
-      records: currentRecords,
-      settings: appState.settings
+      gradeClass: appState.activeClass.replace(/[^0-9]/g, ''),
+      updates: updates,
+      config: appState.settings
     };
 
-    const res = await callGasApi('SYNC_ALL_DATA', payload);
+    const res = await callGasApi('SAVE_CLASS_SCORES_BATCH', payload);
 
     if (res && res.success) {
       markDirty(false);
-      showToast("구글 스프레드시트 중앙 DB와 100% 동기화되었습니다! ☁️");
+      showToast(`${appState.activeClass} 전체 학생 성적이 구글 시트에 안전하게 저장되었습니다! 💾`);
       feedbackAction('success');
     } else {
-      alert("저장 중 오류 응답을 수신했습니다: " + (res.error || '알 수 없는 오류'));
+      alert("시트 저장 오류: " + (res.error || '응답 오류'));
     }
   } catch (err) {
     alert("구글 시트 통신 오류: " + err.message);
   } finally {
     if (btn) btn.disabled = false;
     if (text) text.textContent = "저장";
-    if (icon) icon.classList.remove('animate-spin');
   }
 }
 
 // --------------------------------------------------------------------------
-// 16. 공통 헬퍼: 모달 & 토스트 알림
+// 15. 글래스모피즘 슬림 하단 독 제어 & 공통 헬퍼
 // --------------------------------------------------------------------------
+function toggleBottomKeypadDock() {
+  const dock = document.getElementById('bottomKeypadDock');
+  const text = document.getElementById('dockHandleText');
+  const workspace = document.querySelector('.main-workspace');
+  if (!dock) return;
+
+  appState.isDockCollapsed = !appState.isDockCollapsed;
+  if (appState.isDockCollapsed) {
+    dock.classList.add('dock-collapsed');
+    if (text) text.textContent = "키패드 펼치기";
+    if (workspace) workspace.style.paddingBottom = "30px";
+  } else {
+    dock.classList.remove('dock-collapsed');
+    if (text) text.textContent = "키패드 접기";
+    if (workspace) workspace.style.paddingBottom = "160px";
+  }
+  feedbackAction('tap');
+}
+
 function openModal(id) {
   const m = document.getElementById(id);
   if (m) m.classList.remove('hidden');
@@ -2011,38 +2163,37 @@ function closeAllModals() {
   document.querySelectorAll('.modal-backdrop').forEach(m => m.classList.add('hidden'));
 }
 
-function showToast(message, duration = 2800) {
+function showToast(message, duration = 2600) {
   const container = document.getElementById('toastContainer');
   if (!container) return;
 
   const toast = document.createElement('div');
   toast.className = 'toast-item';
-  toast.innerHTML = `<i data-lucide="info" style="width:16px;height:16px;color:var(--primary);"></i> <span>${message}</span>`;
+  toast.innerHTML = `<i data-lucide="info" style="width:14px;height:14px;color:var(--primary);"></i> <span>${message}</span>`;
   container.appendChild(toast);
   if (window.lucide) lucide.createIcons();
 
   setTimeout(() => {
     toast.style.opacity = '0';
     toast.style.transform = 'translateX(100%)';
-    toast.style.transition = 'all 0.3s ease';
-    setTimeout(() => toast.remove(), 300);
+    toast.style.transition = 'all 0.25s ease';
+    setTimeout(() => toast.remove(), 250);
   }, duration);
 }
 
 // --------------------------------------------------------------------------
-// 17. 앱 부트스트랩 및 전체 이벤트 바인딩
+// 16. 앱 부트스트랩 및 이벤트 바인딩
 // --------------------------------------------------------------------------
 window.addEventListener('DOMContentLoaded', () => {
   initLocalStorageData();
 
-  // 헤더 및 내비게이션 초기화
   updateSemesterHeaderDisplay();
   renderClassTabs();
   renderDomainTabs();
   updateUndoRedoButtons();
   selectFirstStudentInClass();
 
-  // 모달 닫기 버튼 공통 이벤트
+  // 모달 닫기
   document.querySelectorAll('[data-target]').forEach(btn => {
     btn.addEventListener('click', () => {
       const targetId = btn.getAttribute('data-target');
@@ -2065,15 +2216,38 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 종목 마감 토글 바인딩
+  // 마감 잠금 토글
   document.getElementById('btnToggleDomainLock')?.addEventListener('click', toggleDomainLock);
 
-  // 헤더 주요 모달 트리거
+  // 헤더 주요 버튼
   document.getElementById('btnOpenDashboard')?.addEventListener('click', openDashboard);
+  document.getElementById('btnOpenVbaModal')?.addEventListener('click', () => openModal('vbaGuideModal'));
+  document.getElementById('btnOpenDataCenter')?.addEventListener('click', () => {
+    updateSemesterDropdown();
+    openModal('dataCenterModal');
+  });
+  document.getElementById('btnOpenAddRoster')?.addEventListener('click', () => openModal('addRosterModal'));
+  document.getElementById('btnOpenBulkPhoto')?.addEventListener('click', () => openModal('bulkPhotoModal'));
   document.getElementById('btnSaveAll')?.addEventListener('click', saveAllToGoogleSheets);
   document.getElementById('semesterPill')?.addEventListener('click', () => {
     updateSemesterDropdown();
     openModal('dataCenterModal');
+  });
+
+  // 신규 반 추가
+  document.getElementById('btnAddNewClass')?.addEventListener('click', () => {
+    const name = prompt("추가할 신규 학급명을 입력하세요 (예: 6반):");
+    if (!name || !name.trim()) return;
+    const formatted = name.trim().includes('반') ? name.trim() : `${name.trim()}반`;
+    if (!appState.settings.classes.includes(formatted)) {
+      appState.settings.classes.push(formatted);
+      appState.settings.classes.sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0));
+      appState.activeClass = formatted;
+      saveLocalState();
+      renderClassTabs();
+      selectFirstStudentInClass();
+      showToast(`신규 학급 [${formatted}]이 추가되었습니다.`);
+    }
   });
 
   // 검색 & 필터
@@ -2100,7 +2274,7 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // 시기 선택 세그먼트 (1차/2차)
+  // 1차/2차 시기 세그먼트
   document.querySelectorAll('#trialSegment .segment-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       appState.activeTrial = Number(btn.getAttribute('data-trial'));
@@ -2109,7 +2283,7 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // 온스크린 키패드 바인딩
+  // 온스크린 키패드
   document.querySelectorAll('.count-key').forEach(btn => {
     btn.addEventListener('click', () => handleKeypadInput(btn.getAttribute('data-value')));
   });
@@ -2117,7 +2291,7 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btnKeyAbsent')?.addEventListener('click', () => handleKeypadInput('absent'));
   document.getElementById('btnKeyClear')?.addEventListener('click', () => handleKeypadInput('clear'));
 
-  // 이전/다음 학생 이동 바인딩
+  // 학생 이동
   document.getElementById('btnPrevStudent')?.addEventListener('click', () => {
     feedbackAction('tap');
     moveToNextStudent(-1);
@@ -2127,16 +2301,18 @@ window.addEventListener('DOMContentLoaded', () => {
     moveToNextStudent(1);
   });
 
+  // 슬림 독 토글
+  document.getElementById('btnToggleKeypadDock')?.addEventListener('click', toggleBottomKeypadDock);
+
   // 개별 모듈 초기화
   document.getElementById('btnOpenPhotoStudio')?.addEventListener('click', openPhotoStudio);
-  document.getElementById('btnOpenBulkPhoto')?.addEventListener('click', () => openModal('bulkPhotoModal'));
   initCanvasStudioEvents();
   initBulkPhotoUploader();
+  initRosterAdder();
   initMemoModal();
   initStudentManager();
   initDataCenter();
   initSettingsModal();
 
-  // Lucide 아이콘 초기 렌더링
   if (window.lucide) lucide.createIcons();
 });
