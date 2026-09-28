@@ -16,7 +16,7 @@ const APP_STORAGE_KEY = 'PE_EVAL_PRO_V4_DATA';
 const SETTINGS_STORAGE_KEY = 'PE_EVAL_PRO_V4_SETTINGS';
 
 const defaultSettings = {
-  gasApiUrl: 'https://script.google.com/macros/s/AKfycbxP_C6mySgyfnH8ePxVqZ2f67VHdo6eK0TNYcmWdO7xMPjfxTRtnW7_ct_g7MaXA0-aHw/exec',
+  gasApiUrl: 'https://script.google.com/macros/s/AKfycbyHu_eL1ih3tToXYsUlFDBZkcEepMr-mpT9-QjYlj3NQjgBrDxuUUoKXTYiNShTq-PVjw/exec',
   appTitle: '수행평가 입력기 Pro',
   theme: 'indigo',
   bg: 'slate',
