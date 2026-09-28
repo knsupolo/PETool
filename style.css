@@ -1,11 +1,12 @@
 /* ==========================================================================
-   수행평가 입력기 Pro (v4.1 Pro) - 통합 완성형 스타일시트 (style.css)
-   - 2줄 정돈 헤더, v4.1 Pro 골드 배지
-   - 좌측 명렬표 톤다운 점수별 차등 컬러 시스템 & 1차|2차 인라인 요약
-   - 우측 대형 프로필(100px) & 데이터 분석 인포그래픽 대시보드
-   - 우측 영역에만 종속되는 슬림 접이식 키패드 독 (좌측 명렬표 침범 차단)
-   - 12종 테마 색상 & 6종 배경 & 8종 한글 웹폰트
-   - 통합 명렬표, 반별 초기화, 범위형(Range) 배점표 모달 스타일링
+   수행평가 입력기 Pro (v14.1 Pro) - 통합 마스터 스타일시트 (style.css)
+   - 2줄 정돈 헤더, v14.1 Pro 골드 배지 & 모바일 화면전환 세그먼트
+   - 좌측 명렬표 톤다운 차등 배지 시스템 & 1차|2차 인라인 요약 뷰
+   - 가변 스플리터 리사이저 (명렬표 vs 프로필 좌우 너비 자유 조절)
+   - 우측 대형 프로필(96~100px) & 학급/학년 전체 평균 듀얼 인포그래픽
+   - 우측 패널 내부 격리형 접이식 키패드 독 (좌측 명렬표 침범 원천 차단)
+   - 플로팅 스톱워치 / 타이머 위젯
+   - 12종 테마, 6종 배경, 8종 웹폰트 및 아이폰 15 프로맥스 반응형 최적화
    ========================================================================== */
 
 /* --------------------------------------------------------------------------
@@ -44,10 +45,11 @@
   --danger-border: #fecaca;
   --info: #0284c7;
 
-  /* 기본 글꼴 */
+  /* 가변 레이아웃 기본값 */
+  --roster-width: 340px;
   --app-font: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
 
-  /* 라운딩 곡률 & 그림자 */
+  /* 라운딩 및 그림자 */
   --radius-xs: 6px;
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -92,7 +94,7 @@ html[data-bg="dark"] {
   --primary-border: #3730a3;
 }
 
-/* 8종 한글 웹폰트[cite: 5] */
+/* 8종 한글 웹폰트 */
 html[data-font="pretendard"]   { --app-font: 'Pretendard', sans-serif; }
 html[data-font="noto"]         { --app-font: 'Noto Sans KR', sans-serif; }
 html[data-font="nanum"]        { --app-font: 'Nanum Gothic', sans-serif; }
@@ -158,7 +160,7 @@ button:active {
 }
 
 /* --------------------------------------------------------------------------
-   3. 글로벌 헤더 (상단 2줄 정돈 메뉴 구조 - v4.1 Pro)[cite: 5]
+   3. 글로벌 헤더 (상단 2줄 정돈 메뉴 - v14.1 Pro)
    -------------------------------------------------------------------------- */
 .app-header-two-row {
   background-color: var(--bg-surface);
@@ -203,7 +205,7 @@ button:active {
   white-space: nowrap;
 }
 
-/* v4.1 Pro 골드 배지[cite: 5] */
+/* v14.1 Pro 골드 배지 */
 .badge-gold-pro {
   display: inline-flex;
   align-items: center;
@@ -249,7 +251,6 @@ button:active {
   color: var(--text-main);
 }
 
-/* 2줄 액션 매트릭스[cite: 5] */
 .header-action-matrix {
   display: flex;
   flex-direction: column;
@@ -289,7 +290,6 @@ button:active {
   color: var(--primary);
 }
 
-/* 통합 명렬표 등록 하이라이트 칩[cite: 5] */
 .btn-header-chip.highlight-chip {
   background-color: var(--primary-light);
   border-color: var(--primary-border);
@@ -306,7 +306,6 @@ button:active {
   color: var(--text-inverse);
 }
 
-/* 반별 초기화 경고 칩[cite: 5] */
 .btn-header-chip.warning-chip {
   background-color: var(--danger-bg);
   border-color: var(--danger-border);
@@ -318,11 +317,22 @@ button:active {
   color: #ffffff;
 }
 
-.btn-header-chip.warning-chip i {
-  color: var(--danger);
+.btn-header-chip.warning-chip:hover i {
+  color: #ffffff;
 }
 
-.btn-header-chip.warning-chip:hover i {
+.btn-header-chip.success-chip {
+  background-color: var(--success-bg);
+  border-color: var(--success-border);
+  color: var(--success);
+}
+
+.btn-header-chip.success-chip:hover {
+  background-color: var(--success);
+  color: #ffffff;
+}
+
+.btn-header-chip.success-chip:hover i {
   color: #ffffff;
 }
 
@@ -359,6 +369,12 @@ button:active {
 .btn-icon i {
   width: 14px;
   height: 14px;
+}
+
+.btn-icon[data-tts="on"] {
+  background-color: var(--primary-light);
+  border-color: var(--primary-border);
+  color: var(--primary);
 }
 
 .btn-primary-save {
@@ -404,7 +420,47 @@ button:active {
 }
 
 /* --------------------------------------------------------------------------
-   4. 서브 내비게이션 바 (반/종목 탭 및 마감 잠금 스위치)[cite: 5]
+   4. 모바일 화면 전환 세그먼트 바 (iPhone 15 Pro Max 최적화)
+   -------------------------------------------------------------------------- */
+.mobile-view-segment-bar {
+  display: none;
+  background-color: var(--bg-surface);
+  border-bottom: 1px solid var(--border-color);
+  padding: 4px 8px;
+  gap: 6px;
+  z-index: 35;
+}
+
+.mobile-seg-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.76rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  background-color: var(--bg-surface-sub);
+  border: 1px solid var(--border-color);
+  transition: all 0.15s ease;
+}
+
+.mobile-seg-btn.active {
+  background-color: var(--primary);
+  color: var(--text-inverse);
+  border-color: var(--primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.mobile-seg-btn i {
+  width: 14px;
+  height: 14px;
+}
+
+/* --------------------------------------------------------------------------
+   5. 서브 내비게이션 바 (반 동적 탭 & 가로형 평가영역 탭 바)
    -------------------------------------------------------------------------- */
 .sub-navbar {
   height: 48px;
@@ -533,28 +589,56 @@ button:active {
 }
 
 /* --------------------------------------------------------------------------
-   5. 메인 레이아웃 (스플릿 대시보드 구조)[cite: 5]
+   6. 메인 레이아웃 & 가변 스플리터 리사이저
    -------------------------------------------------------------------------- */
 .main-workspace {
-  display: grid;
-  grid-template-columns: 330px 1fr;
+  display: flex;
   flex: 1;
   overflow: hidden;
   position: relative;
+  width: 100%;
 }
 
-/* --------------------------------------------------------------------------
-   6. 좌측 패널: 학생 명렬표 카드 리스트 (독립 스크롤 & 톤다운 배지)[cite: 5]
-   -------------------------------------------------------------------------- */
 .roster-panel {
+  width: var(--roster-width);
+  min-width: 280px;
+  max-width: 520px;
   background-color: var(--bg-surface);
-  border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   height: 100%;
+  flex-shrink: 0;
 }
 
+/* 좌우 분할 조절 스플리터 바 */
+.workspace-splitter {
+  width: 7px;
+  background-color: var(--border-color);
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  transition: background-color 0.15s ease;
+  z-index: 10;
+  flex-shrink: 0;
+}
+
+.workspace-splitter:hover, .workspace-splitter.dragging {
+  background-color: var(--primary-border);
+}
+
+.splitter-grip-handle {
+  width: 3px;
+  height: 28px;
+  border-radius: 9999px;
+  background-color: var(--border-strong);
+}
+
+/* --------------------------------------------------------------------------
+   7. 좌측 패널: 학생 명렬표 (톤다운 점수별 차등 배지 & 1차|2차 인라인 요약)
+   -------------------------------------------------------------------------- */
 .roster-header {
   padding: 10px;
   border-bottom: 1px solid var(--border-color);
@@ -604,9 +688,9 @@ button:active {
 
 .filter-chip {
   flex: 1;
-  padding: 3px 5px;
+  padding: 3px 4px;
   border-radius: var(--radius-xs);
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   font-weight: 800;
   text-align: center;
   background-color: var(--bg-surface);
@@ -630,7 +714,6 @@ button:active {
   gap: 6px;
 }
 
-/* 개별 학생 명렬 카드[cite: 5] */
 .student-card {
   display: flex;
   align-items: center;
@@ -681,6 +764,7 @@ button:active {
   height: 36px;
   border-radius: 50%;
   object-fit: cover;
+  object-position: center;
   border: 1px solid var(--border-color);
   background-color: var(--bg-surface-sub);
   flex-shrink: 0;
@@ -706,11 +790,10 @@ button:active {
   text-overflow: ellipsis;
 }
 
-/* 1차|2차 인라인 요약 뷰[cite: 5] */
 .card-scores-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   font-size: 0.7rem;
   font-weight: 700;
   color: var(--text-muted);
@@ -720,7 +803,7 @@ button:active {
 .trial-split-box {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   background-color: var(--bg-surface-sub);
   padding: 1px 5px;
   border-radius: 4px;
@@ -732,7 +815,7 @@ button:active {
   color: var(--text-main);
 }
 
-/* 눈이 편안한 톤다운 점수대별 차등 배지 시스템[cite: 5] */
+/* 톤다운 점수대별 차등 배지 시스템 */
 .card-badge {
   font-size: 0.72rem;
   font-weight: 800;
@@ -742,7 +825,6 @@ button:active {
   letter-spacing: -0.01em;
 }
 
-/* 만점: 앰버 골드 톤다운 강조[cite: 5] */
 .card-badge.max {
   background-color: #fef3c7;
   color: #92400e;
@@ -751,35 +833,30 @@ button:active {
   box-shadow: 0 1px 3px rgba(245, 158, 11, 0.2);
 }
 
-/* 상위권 (80% 이상): 소프트 에메랄드[cite: 5] */
 .card-badge.high {
   background-color: #ecfdf5;
   color: #065f46;
   border: 1px solid #a7f3d0;
 }
 
-/* 중위권 (50%~79%): 소프트 스카이[cite: 5] */
 .card-badge.mid {
   background-color: #f0f9ff;
   color: #0369a1;
   border: 1px solid #bae6fd;
 }
 
-/* 하위권 (50% 미만): 쿨 슬레이트[cite: 5] */
 .card-badge.low {
   background-color: #f1f5f9;
   color: #475569;
   border: 1px solid #cbd5e1;
 }
 
-/* 미참여(결석): 톤다운 소프트 로즈[cite: 5] */
 .card-badge.absent {
   background-color: #fff1f2;
   color: #9f1239;
   border: 1px solid #fecdd3;
 }
 
-/* 미측정: 서브 그레이[cite: 5] */
 .card-badge.undone {
   background-color: var(--bg-surface-sub);
   color: var(--text-sub);
@@ -787,9 +864,10 @@ button:active {
 }
 
 /* --------------------------------------------------------------------------
-   7. 우측 패널: 대화면 프로필 & 데이터 분석 & 측정 보드[cite: 5]
+   8. 우측 패널: 대형 프로필 & 학급/학년 전체 인포그래픽 대시보드
    -------------------------------------------------------------------------- */
 .measurement-panel {
+  flex: 1;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -808,7 +886,6 @@ button:active {
   gap: 12px;
 }
 
-/* 대형 학생 프로필 히어로 카드[cite: 5] */
 .profile-hero-card {
   background-color: var(--bg-surface);
   border: 1px solid var(--border-color);
@@ -821,7 +898,7 @@ button:active {
   position: relative;
 }
 
-/* 100px 대형 프로필 아바타 박스[cite: 5] */
+/* 100px 대형 프로필 아바타 박스 */
 .profile-avatar-box.large-avatar {
   width: 96px;
   height: 96px;
@@ -831,13 +908,16 @@ button:active {
   flex-shrink: 0;
 }
 
-.profile-avatar-box.large-avatar img {
+/* 사진 가로 늘어남 방지 (종횡비 왜곡 차단) */
+.avatar-fit-cover {
   width: 100%;
   height: 100%;
   border-radius: 50%;
   object-fit: cover;
+  object-position: center;
   border: 2.5px solid var(--primary-border);
   box-shadow: var(--shadow-sm);
+  display: block;
 }
 
 .avatar-camera-overlay {
@@ -967,7 +1047,7 @@ button:active {
 }
 
 /* --------------------------------------------------------------------------
-   8. 신규: 학생 데이터 분석 인포그래픽 대시보드 카드[cite: 5]
+   9. 학급 및 1~7반 전체(학년) 데이터 분석 인포그래픽 카드
    -------------------------------------------------------------------------- */
 .student-analytics-card {
   background-color: var(--bg-surface);
@@ -1057,28 +1137,39 @@ button:active {
   color: var(--text-muted);
 }
 
-.gauge-bar-bg {
+/* 듀얼 게이지 인디케이터 (학급 평균 vs 학년 전체 평균) */
+.gauge-bar-bg.dual-gauge {
   position: relative;
   width: 100%;
-  height: 7px;
+  height: 8px;
   background-color: var(--border-color);
   border-radius: 9999px;
-  overflow: hidden;
+  overflow: visible;
 }
 
-.gauge-bar-center-line {
+.gauge-marker {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 2px;
-  background-color: var(--text-sub);
-  z-index: 2;
+  top: -4px;
+  bottom: -4px;
+  width: 3px;
+  border-radius: 2px;
+  z-index: 5;
+}
+
+.gauge-marker.class-avg {
+  background-color: var(--primary);
+  box-shadow: 0 0 4px var(--primary);
+}
+
+.gauge-marker.school-avg {
+  background-color: #d97706; /* 앰버 골드 */
+  box-shadow: 0 0 4px rgba(217, 119, 6, 0.6);
 }
 
 .gauge-bar-fill {
   height: 100%;
   background: linear-gradient(90deg, var(--primary-border), var(--primary));
+  border-radius: 9999px;
   transition: width 0.3s ease;
 }
 
@@ -1088,6 +1179,8 @@ button:active {
   justify-content: space-between;
   font-size: 0.68rem;
   color: var(--text-muted);
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .metric-sub-desc b {
@@ -1120,7 +1213,7 @@ button:active {
   color: var(--success);
 }
 
-/* 측정 컨트롤 보드[cite: 5] */
+/* 측정 컨트롤 보드 */
 .measurement-control-board {
   background-color: var(--bg-surface);
   border: 1px solid var(--border-color);
@@ -1321,7 +1414,7 @@ input:checked + .slider:before {
 }
 
 /* --------------------------------------------------------------------------
-   9. 우측 패널 내부 종속 슬림 접이식 키패드 독 (좌측 명렬표 침범 차단)[cite: 5]
+   10. 우측 패널 내부 종속 키패드 독 (명렬표 침범 차단)
    -------------------------------------------------------------------------- */
 .right-scoped-keypad-dock {
   position: absolute;
@@ -1343,7 +1436,6 @@ html[data-bg="dark"] .right-scoped-keypad-dock {
   border-top-color: var(--border-color);
 }
 
-/* 접힘 상태: 우측 패널 하단으로만 슬라이드 다운[cite: 5] */
 .right-scoped-keypad-dock.dock-collapsed {
   transform: translateY(calc(100% - 24px));
 }
@@ -1454,7 +1546,100 @@ html[data-bg="dark"] .dock-toggle-handle {
 }
 
 /* --------------------------------------------------------------------------
-   10. 공통 모달 시스템 & 다이얼로그[cite: 5]
+   11. 플로팅 스톱워치 / 타이머 위젯
+   -------------------------------------------------------------------------- */
+.floating-stopwatch-widget {
+  position: fixed;
+  bottom: 24px;
+  left: 24px;
+  width: 220px;
+  background: rgba(15, 23, 42, 0.94);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xl);
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: zoomIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.stopwatch-header {
+  padding: 6px 10px;
+  background-color: rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: move;
+  user-select: none;
+}
+
+.stopwatch-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #38bdf8;
+}
+
+.stopwatch-title i {
+  width: 13px;
+  height: 13px;
+}
+
+.btn-stopwatch-close {
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+}
+
+.btn-stopwatch-close:hover {
+  color: #ffffff;
+}
+
+.btn-stopwatch-close i {
+  width: 14px;
+  height: 14px;
+}
+
+.stopwatch-display {
+  font-family: monospace;
+  font-size: 1.8rem;
+  font-weight: 900;
+  color: #ffffff;
+  text-align: center;
+  padding: 10px 0 6px 0;
+  letter-spacing: 0.05em;
+}
+
+.stopwatch-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 4px;
+  padding: 0 8px 8px 8px;
+}
+
+.btn-sw {
+  padding: 5px 0;
+  border-radius: var(--radius-xs);
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #ffffff;
+  text-align: center;
+  transition: all 0.1s ease;
+}
+
+.btn-sw.start { background-color: #059669; }
+.btn-sw.start.running { background-color: #dc2626; }
+.btn-sw.lap { background-color: #0284c7; }
+.btn-sw.lap:disabled { opacity: 0.35; cursor: not-allowed; }
+.btn-sw.reset { background-color: #475569; }
+
+/* --------------------------------------------------------------------------
+   12. 공통 모달 시스템 & 다이얼로그
    -------------------------------------------------------------------------- */
 .modal-backdrop {
   position: fixed;
@@ -1495,8 +1680,8 @@ html[data-bg="dark"] .dock-toggle-handle {
 }
 
 .modal-sm { max-width: 420px; }
-.modal-md { max-width: 560px; }
-.modal-lg { max-width: 820px; }
+.modal-md { max-width: 580px; }
+.modal-lg { max-width: 840px; }
 
 .modal-header {
   padding: 14px 18px;
@@ -1609,6 +1794,10 @@ html[data-bg="dark"] .dock-toggle-handle {
   cursor: pointer;
 }
 
+.btn-action-outline.full-width {
+  width: 100%;
+}
+
 .btn-tool-sub {
   padding: 5px 10px;
   border: 1px solid var(--border-color);
@@ -1623,8 +1812,54 @@ html[data-bg="dark"] .dock-toggle-handle {
 }
 
 /* --------------------------------------------------------------------------
-   11. 모달 세부: 반별 초기화 모달 스타일[cite: 5]
+   13. 모달 세부: 기본 양식 & 반별 초기화 & 사진 순번 보정 도구
    -------------------------------------------------------------------------- */
+.template-download-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.btn-action-card {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-surface-sub);
+  border: 1px solid var(--border-color);
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.btn-action-card:hover {
+  border-color: var(--primary-border);
+  background-color: var(--primary-light);
+}
+
+.btn-action-card i {
+  width: 24px;
+  height: 24px;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.btn-card-texts {
+  display: flex;
+  flex-direction: column;
+}
+
+.btn-card-texts strong {
+  font-size: 0.84rem;
+  color: var(--text-main);
+}
+
+.btn-card-texts span {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
 .reset-modal-desc {
   font-size: 0.84rem;
   color: var(--text-main);
@@ -1681,11 +1916,182 @@ html[data-bg="dark"] .dock-toggle-handle {
 }
 
 /* --------------------------------------------------------------------------
-   12. 모달 세부: 캔버스 사진 스튜디오 (Scale X/Y & 8종 필터)[cite: 5]
+   14. 모달 세부: 환경설정 가로 탭 바 및 범위형 배점표 에디터
+   -------------------------------------------------------------------------- */
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background-color: var(--bg-surface-sub);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+}
+
+.settings-group-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 900;
+  color: var(--text-main);
+}
+
+.settings-group-title i {
+  color: var(--primary);
+  width: 15px;
+  height: 15px;
+}
+
+.settings-hint {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.api-url-row, .form-row, .semester-manage-row {
+  display: flex;
+  gap: 6px;
+}
+
+.input-text, .select-field {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-surface);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.input-sm {
+  width: 90px;
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-surface);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.color-palette-grid, .bg-palette-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.theme-color-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--bg-surface);
+  box-shadow: 0 0 0 1px var(--border-strong);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.theme-color-btn.active {
+  transform: scale(1.18);
+  box-shadow: 0 0 0 2px var(--text-main);
+}
+
+/* 가로형 평가영역 탭 선택 바 */
+.domain-editor-tabs-bar {
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  padding: 4px 0;
+  scrollbar-width: none;
+}
+
+.domain-editor-tabs-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.domain-tab-pill {
+  padding: 5px 12px;
+  border-radius: 9999px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.domain-tab-pill.active {
+  background-color: var(--primary);
+  color: var(--text-inverse);
+  border-color: var(--primary);
+}
+
+.domain-setting-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.domain-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.domain-action-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tier-range-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-surface-sub);
+  padding: 4px 8px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border-color);
+}
+
+.tier-range-input {
+  width: 42px;
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 800;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: var(--bg-surface);
+  padding: 2px 0;
+}
+
+.btn-step-order {
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-surface);
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: var(--text-muted);
+}
+
+.btn-step-order:hover {
+  background-color: var(--border-color);
+  color: var(--text-main);
+}
+
+/* --------------------------------------------------------------------------
+   15. 캔버스 사진 스튜디오 & 필터 스타일
    -------------------------------------------------------------------------- */
 .studio-layout {
   display: grid;
-  grid-template-columns: 340px 1fr;
+  grid-template-columns: 320px 1fr;
   gap: 16px;
 }
 
@@ -1697,8 +2103,8 @@ html[data-bg="dark"] .dock-toggle-handle {
 }
 
 .canvas-viewport {
-  width: 300px;
-  height: 300px;
+  width: 290px;
+  height: 290px;
   border-radius: var(--radius-lg);
   background-color: #000;
   position: relative;
@@ -1719,7 +2125,7 @@ html[data-bg="dark"] .dock-toggle-handle {
 
 .face-guide-circle {
   position: absolute;
-  inset: 18px;
+  inset: 16px;
   border: 2px dashed rgba(255, 255, 255, 0.8);
   border-radius: 50%;
   pointer-events: none;
@@ -1812,242 +2218,7 @@ html[data-bg="dark"] .dock-toggle-handle {
 }
 
 /* --------------------------------------------------------------------------
-   13. 모달 세부: 통합 명렬표 등록 & VBA 가이드[cite: 5]
-   -------------------------------------------------------------------------- */
-.bulk-upload-dropzone {
-  border: 2px dashed var(--primary-border);
-  background-color: var(--primary-light);
-  border-radius: var(--radius-md);
-  padding: 26px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  gap: 6px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.bulk-upload-dropzone:hover {
-  background-color: var(--bg-surface);
-  border-color: var(--primary);
-}
-
-.dropzone-icon {
-  width: 36px;
-  height: 36px;
-  color: var(--primary);
-}
-
-.dropzone-text {
-  font-size: 0.84rem;
-  color: var(--text-main);
-}
-
-.dropzone-sub {
-  font-size: 0.72rem;
-  color: var(--text-muted);
-}
-
-.progress-bar-bg {
-  width: 100%;
-  height: 7px;
-  background-color: var(--border-color);
-  border-radius: 9999px;
-  overflow: hidden;
-}
-
-.progress-bar-fill {
-  height: 100%;
-  background-color: var(--primary);
-  transition: width 0.25s ease;
-}
-
-.macro-guide-box {
-  background-color: var(--bg-surface-sub);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.guide-header {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 0.78rem;
-  font-weight: 800;
-  color: var(--text-main);
-}
-
-.guide-header i {
-  color: var(--warning);
-}
-
-.guide-desc {
-  font-size: 0.72rem;
-  color: var(--text-muted);
-}
-
-.btn-link-action {
-  font-size: 0.75rem;
-  font-weight: 800;
-  color: var(--primary);
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  margin-top: 3px;
-}
-
-.code-textarea {
-  width: 100%;
-  height: 170px;
-  background-color: #0f172a;
-  color: #38bdf8;
-  font-family: monospace;
-  font-size: 0.75rem;
-  padding: 10px;
-  border-radius: var(--radius-sm);
-  resize: none;
-  line-height: 1.5;
-}
-
-/* --------------------------------------------------------------------------
-   14. 모달 세부: 환경설정 & 평가 영역 순서이동/복사 & 범위형 배점표[cite: 5]
-   -------------------------------------------------------------------------- */
-.settings-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  background-color: var(--bg-surface-sub);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  padding: 12px;
-}
-
-.settings-group-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.82rem;
-  font-weight: 900;
-  color: var(--text-main);
-}
-
-.settings-group-title i {
-  color: var(--primary);
-  width: 15px;
-  height: 15px;
-}
-
-.settings-hint {
-  font-size: 0.7rem;
-  color: var(--text-muted);
-}
-
-.api-url-row, .form-row, .semester-manage-row {
-  display: flex;
-  gap: 6px;
-}
-
-.input-text, .select-field {
-  width: 100%;
-  padding: 6px 10px;
-  border-radius: var(--radius-xs);
-  border: 1px solid var(--border-color);
-  background-color: var(--bg-surface);
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
-.color-palette-grid, .bg-palette-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-.theme-color-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 2px solid var(--bg-surface);
-  box-shadow: 0 0 0 1px var(--border-strong);
-  cursor: pointer;
-  transition: transform 0.15s ease;
-}
-
-.theme-color-btn.active {
-  transform: scale(1.18);
-  box-shadow: 0 0 0 2px var(--text-main);
-}
-
-/* 평가 영역 카드 에디터[cite: 5] */
-.domain-setting-card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  padding: 10px;
-  margin-top: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.domain-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-}
-
-.domain-action-tools {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-/* 범위형 배점표 구간 행[cite: 5] */
-.tier-range-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  background: var(--bg-surface-sub);
-  padding: 3px 6px;
-  border-radius: var(--radius-xs);
-  border: 1px solid var(--border-color);
-}
-
-.tier-range-input {
-  width: 38px;
-  text-align: center;
-  font-size: 0.75rem;
-  font-weight: 800;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  background-color: var(--bg-surface);
-}
-
-.btn-step-order {
-  padding: 2px 6px;
-  border-radius: 4px;
-  border: 1px solid var(--border-color);
-  background-color: var(--bg-surface);
-  font-size: 0.7rem;
-  font-weight: 800;
-  color: var(--text-muted);
-}
-
-.btn-step-order:hover {
-  background-color: var(--border-color);
-  color: var(--text-main);
-}
-
-/* --------------------------------------------------------------------------
-   15. 토스트 알림 컴포넌트[cite: 5]
+   16. 토스트 알림 컴포넌트
    -------------------------------------------------------------------------- */
 .toast-container {
   position: fixed;
@@ -2082,18 +2253,38 @@ html[data-bg="dark"] .dock-toggle-handle {
 }
 
 /* --------------------------------------------------------------------------
-   16. 태블릿 / 모바일 반응형 분기[cite: 5]
+   17. 모바일 / 아이폰 15 프로맥스 반응형 분기
    -------------------------------------------------------------------------- */
 @media (max-width: 900px) {
-  .main-workspace {
-    grid-template-columns: 1fr;
-    grid-template-rows: 240px 1fr;
+  .workspace-splitter {
+    display: none !important;
   }
 
-  .roster-panel {
-    border-right: none;
-    border-bottom: 1px solid var(--border-color);
-    height: 240px;
+  /* 모바일 화면 전환 세그먼트 활성화 */
+  .mobile-view-segment-bar {
+    display: flex;
+  }
+
+  /* HTML data-mobile-view에 따라 뷰 전환 */
+  html[data-mobile-view="roster"] .roster-panel {
+    display: flex;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100%;
+  }
+
+  html[data-mobile-view="roster"] .measurement-panel {
+    display: none !important;
+  }
+
+  html[data-mobile-view="measure"] .roster-panel {
+    display: none !important;
+  }
+
+  html[data-mobile-view="measure"] .measurement-panel {
+    display: flex;
+    width: 100% !important;
+    height: 100%;
   }
 
   .studio-layout {
@@ -2103,6 +2294,11 @@ html[data-bg="dark"] .dock-toggle-handle {
 
   .analytics-grid {
     grid-template-columns: 1fr;
+  }
+
+  .floating-stopwatch-widget {
+    bottom: 70px;
+    left: 12px;
   }
 }
 
