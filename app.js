@@ -10,7 +10,7 @@ const APP_STORAGE_KEY = 'PE_EVAL_PRO_V2_DATA';
 const SETTINGS_STORAGE_KEY = 'PE_EVAL_PRO_V2_SETTINGS';
 
 const defaultSettings = {
-  gasApiUrl: '',
+  gasApiUrl: 'https://script.google.com/macros/s/AKfycbxP_C6mySgyfnH8ePxVqZ2f67VHdo6eK0TNYcmWdO7xMPjfxTRtnW7_ct_g7MaXA0-aHw/exec',
   theme: 'indigo',
   bg: 'slate',
   font: 'pretendard',
